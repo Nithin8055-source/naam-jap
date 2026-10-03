@@ -47,7 +47,7 @@ private fun InsightsScreenPreview() {
 fun InsightsScreen(viewModel: InsightsViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var range by rememberSaveable { mutableStateOf("Week") }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = JapSpacing.lg, vertical = JapSpacing.md)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = JapSpacing.lg, top = JapSpacing.md, end = JapSpacing.lg, bottom = 104.dp)) {
         Text("Your journey", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text("Insights", style = MaterialTheme.typography.headlineLarge)
         Spacer(Modifier.height(JapSpacing.lg))

@@ -18,7 +18,7 @@ fun SplashWallpaperScreen(darkTheme: Boolean) {
             painter = painterResource(R.drawable.bg_opening_wallpaper),
             contentDescription = "Naam Jap sunrise lotus",
             modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop
+            contentScale = ContentScale.Fit
         )
         if (darkTheme) Box(Modifier.fillMaxSize().background(Color(0xFF171512).copy(alpha = .20f)))
     }

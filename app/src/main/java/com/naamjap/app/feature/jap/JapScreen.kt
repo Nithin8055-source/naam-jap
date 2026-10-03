@@ -62,7 +62,7 @@ fun JapScreen(viewModel: JapViewModel = hiltViewModel()) {
     val countPressed by countInteraction.collectIsPressedAsState()
     val countScale by androidx.compose.animation.core.animateFloatAsState(if (countPressed) .96f else 1f, label = "count button press")
     Box(Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = JapSpacing.xl, vertical = JapSpacing.lg), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = JapSpacing.xl, top = JapSpacing.lg, end = JapSpacing.xl, bottom = 112.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(state.title, style = MaterialTheme.typography.headlineMedium)
             Spacer(Modifier.height(JapSpacing.xs))
             Text("Ready · UI preview", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

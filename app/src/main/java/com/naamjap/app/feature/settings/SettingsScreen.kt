@@ -41,7 +41,7 @@ private fun SettingsScreenPreview() {
 @Composable
 fun SettingsScreen(themeChoice: ThemeChoice, onThemeChoice: (ThemeChoice) -> Unit, viewModel: SettingsViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = JapSpacing.lg, vertical = JapSpacing.md), verticalArrangement = Arrangement.spacedBy(JapSpacing.md)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = JapSpacing.lg, top = JapSpacing.md, end = JapSpacing.lg, bottom = 104.dp), verticalArrangement = Arrangement.spacedBy(JapSpacing.md)) {
         Text("Make it yours", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text("Settings", style = MaterialTheme.typography.headlineLarge)
         GlassSurface(Modifier.fillMaxWidth()) {

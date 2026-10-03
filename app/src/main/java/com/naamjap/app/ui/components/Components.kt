@@ -37,10 +37,19 @@ import androidx.compose.ui.unit.dp
 import com.naamjap.app.navigation.Destination
 import com.naamjap.app.R
 import com.naamjap.app.ui.theme.JapSpacing
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeEffect
 
 @Composable
 fun PremiumScaffold(bottomBar: @Composable () -> Unit, content: @Composable (PaddingValues) -> Unit) {
-    Scaffold(containerColor = MaterialTheme.colorScheme.background, bottomBar = bottomBar, content = content)
+    Scaffold(containerColor = MaterialTheme.colorScheme.background) { innerPadding ->
+        Box(Modifier.fillMaxSize()) {
+            content(innerPadding)
+            Box(Modifier.align(Alignment.BottomCenter)) {
+                bottomBar()
+            }
+        }
+    }
 }
 
 @Composable
@@ -219,7 +228,7 @@ fun ThemePreview(label: String, selected: Boolean, onClick: () -> Unit, icon: @C
 }
 
 @Composable
-fun GlassBottomBar(selectedRoute: String?, onSelect: (Destination) -> Unit, modifier: Modifier = Modifier) {
+fun GlassBottomBar(selectedRoute: String?, onSelect: (Destination) -> Unit, modifier: Modifier = Modifier, hazeState: HazeState? = null) {
     val haptics = LocalHapticFeedback.current
     Box(modifier.fillMaxWidth()) {
         Box(
@@ -229,12 +238,16 @@ fun GlassBottomBar(selectedRoute: String?, onSelect: (Destination) -> Unit, modi
                 .blur(18.dp)
         )
         Surface(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().clip(CircleShape).hazeEffect(state = hazeState) {
+                backgroundColor = MaterialTheme.colorScheme.surface.copy(alpha = .44f)
+                blurRadius = 22.dp
+                noiseFactor = 0f
+            },
             shape = CircleShape,
-            color = MaterialTheme.colorScheme.surface.copy(alpha = .72f),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = .30f),
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .82f)),
             shadowElevation = 14.dp,
-            tonalElevation = 4.dp
+            tonalElevation = 0.dp
         ) {
             BoxWithConstraints(Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(MaterialTheme.colorScheme.onSurface.copy(alpha = .035f), MaterialTheme.colorScheme.surface.copy(alpha = 0f)))).padding(horizontal = 5.dp, vertical = 6.dp)) {
                 val itemWidth = maxWidth / Destination.primary.size

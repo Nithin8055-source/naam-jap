@@ -64,7 +64,7 @@ fun HistoryScreen(viewModel: HistoryViewModel = hiltViewModel()) {
     val cells = List(leadingBlanks) { 0 } + days
     val weeks = cells.chunked(7).map { week -> week + List(7 - week.size) { 0 } }
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = JapSpacing.lg, vertical = JapSpacing.md)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = JapSpacing.lg, top = JapSpacing.md, end = JapSpacing.lg, bottom = 104.dp)) {
         Text("Your practice", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text("History", style = MaterialTheme.typography.headlineLarge)
         Spacer(Modifier.height(JapSpacing.lg))

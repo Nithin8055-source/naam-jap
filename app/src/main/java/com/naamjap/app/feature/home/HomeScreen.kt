@@ -47,9 +47,9 @@ fun HomeScreen(onNavigate: (String) -> Unit, viewModel: HomeViewModel = hiltView
     Box(Modifier.fillMaxSize()) {
         Image(painterResource(R.drawable.bg_sunrise), null, Modifier.fillMaxSize().alpha(.18f), contentScale = ContentScale.Crop)
         Image(painterResource(R.drawable.ic_mandala), null, Modifier.align(Alignment.TopEnd).offset(x = 42.dp, y = 112.dp).size(220.dp).alpha(.045f), contentScale = ContentScale.Fit)
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = JapSpacing.lg, vertical = JapSpacing.md)) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = JapSpacing.lg, top = JapSpacing.md, end = JapSpacing.lg, bottom = 104.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            NaamJapLogo(Modifier.size(58.dp).padding(end = 8.dp))
+            NaamJapLogo(Modifier.size(76.dp).padding(end = 8.dp))
             Column(Modifier.weight(1f)) {
                 Text(state.greeting, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("A quieter moment", style = MaterialTheme.typography.headlineMedium)

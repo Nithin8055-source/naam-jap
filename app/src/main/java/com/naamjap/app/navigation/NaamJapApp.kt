@@ -4,6 +4,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -18,6 +20,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeSource
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -36,6 +40,7 @@ import com.naamjap.app.ui.theme.ThemeChoice
 @Composable
 fun NaamJapApp(themeChoice: ThemeChoice, onThemeChoice: (ThemeChoice) -> Unit) {
     val navController = rememberNavController()
+    val hazeState = remember { HazeState() }
     val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
     val density = LocalDensity.current
     val swipeThreshold = with(density) { 64.dp.toPx() }
@@ -52,7 +57,7 @@ fun NaamJapApp(themeChoice: ThemeChoice, onThemeChoice: (ThemeChoice) -> Unit) {
 
     PremiumScaffold(bottomBar = {
         if (currentRoute != Destination.ManualRecord.route) Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
-        GlassBottomBar(selectedRoute = currentRoute, onSelect = { destination ->
+        GlassBottomBar(selectedRoute = currentRoute, hazeState = hazeState, onSelect = { destination ->
             navigateToPrimary(destination)
         })
         }
@@ -61,12 +66,13 @@ fun NaamJapApp(themeChoice: ThemeChoice, onThemeChoice: (ThemeChoice) -> Unit) {
         NavHost(
             navController = navController,
             startDestination = Destination.Home.route,
-            enterTransition = { slideInHorizontally { width -> width / 8 } + fadeIn() },
-            exitTransition = { slideOutHorizontally { width -> -width / 8 } + fadeOut() },
-            popEnterTransition = { slideInHorizontally { width -> -width / 8 } + fadeIn() },
-            popExitTransition = { slideOutHorizontally { width -> width / 8 } + fadeOut() },
+            enterTransition = { slideInHorizontally(animationSpec = tween(380, easing = FastOutSlowInEasing)) { width -> width / 6 } + fadeIn(tween(260)) },
+            exitTransition = { slideOutHorizontally(animationSpec = tween(380, easing = FastOutSlowInEasing)) { width -> -width / 6 } + fadeOut(tween(220)) },
+            popEnterTransition = { slideInHorizontally(animationSpec = tween(380, easing = FastOutSlowInEasing)) { width -> -width / 6 } + fadeIn(tween(260)) },
+            popExitTransition = { slideOutHorizontally(animationSpec = tween(380, easing = FastOutSlowInEasing)) { width -> width / 6 } + fadeOut(tween(220)) },
             modifier = Modifier
                 .padding(innerPadding)
+                .hazeSource(hazeState)
                 .pointerInput(currentRoute, isPrimaryRoute) {
                     if (isPrimaryRoute) {
                         detectHorizontalDragGestures(

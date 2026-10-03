@@ -9,6 +9,7 @@ import com.naamjap.app.domain.repository.PracticeDataState
 import com.naamjap.app.domain.repository.PracticeHistoryItem
 import com.naamjap.app.domain.repository.PracticeRepository
 import com.naamjap.app.domain.repository.SessionAction
+import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.rpc

@@ -3,6 +3,7 @@ package com.naamjap.app.data.remote.profile
 import com.naamjap.app.data.remote.SupabaseProvider
 import com.naamjap.app.domain.model.UserProfile
 import com.naamjap.app.domain.repository.ProfileRepository
+import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.rpc
 import io.github.jan.supabase.postgrest.result.decodeSingle

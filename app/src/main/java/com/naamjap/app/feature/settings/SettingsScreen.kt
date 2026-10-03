@@ -96,7 +96,23 @@ fun SettingsScreen(
             SettingsRow(Icons.Default.Vibration, "Haptic feedback", "Coming soon")
             SettingsRow(Icons.Default.VolumeUp, "Sound", "Coming soon")
             Row(verticalAlignment = Alignment.CenterVertically) { OutlinedTextField(value = goalDraft.ifBlank { practice.dashboard.dailyGoal.toString() }, onValueChange = { goalDraft = it.filter(Char::isDigit).take(10) }, label = { Text("Daily target") }, modifier = Modifier.weight(1f)); TextButton(onClick = { viewModel.saveGoal(goalDraft.ifBlank { practice.dashboard.dailyGoal.toString() }) }) { Text("Save") } }
-            OutlinedTextField(naamDraft, { naamDraft = it.take(80) }, label = { Text("Add a naam type") }, modifier = Modifier.fillMaxWidth(), trailingIcon = { TextButton(onClick = { viewModel.addNaam(naamDraft); naamDraft = "" }, enabled = naamDraft.trim().length >= 2) { Text("Add") } })
+            OutlinedTextField(
+                value = naamDraft,
+                onValueChange = { updatedNaam: String -> naamDraft = updatedNaam.take(80) },
+                label = { Text("Add a naam type") },
+                modifier = Modifier.fillMaxWidth(),
+                trailingIcon = {
+                    TextButton(
+                        onClick = {
+                            viewModel.addNaam(naamDraft)
+                            naamDraft = ""
+                        },
+                        enabled = naamDraft.trim().length >= 2
+                    ) {
+                        Text("Add")
+                    }
+                }
+            )
             practice.naamTypes.forEach { naam -> Row(verticalAlignment = Alignment.CenterVertically) { Text(naam.name, Modifier.weight(1f)); Text(if (naam.isDefault) "Default" else ""); if (!naam.isDefault) TextButton(onClick = { viewModel.setDefaultNaam(naam.id) }) { Text("Set default") } } }
         }
 

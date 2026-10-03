@@ -123,8 +123,48 @@ fun SettingsScreen(
             dismissButton = { TextButton(onClick = { confirmSignOut = false }) { Text("Cancel") } }
         )
     }
-    if (editName) AlertDialog(onDismissRequest = { editName = false }, title = { Text("Display name") }, text = { OutlinedTextField(nameDraft, { nameDraft = it }, label = { Text("Name") }) }, confirmButton = { TextButton(onClick = { editName = false; viewModel.saveName(nameDraft) }) { Text("Save") } }, dismissButton = { TextButton(onClick = { editName = false }) { Text("Cancel") } })
-    if (confirmDelete) AlertDialog(onDismissRequest = { confirmDelete = false }, title = { Text("Delete account and data?") }, text = { Text("This permanently removes your account and its cloud practice data.") }, confirmButton = { TextButton(onClick = { confirmDelete = false; viewModel.deleteAccount() }) { Text("Delete", color = MaterialTheme.colorScheme.error) } }, dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } })
+    if (editName) {
+        AlertDialog(
+            onDismissRequest = { editName = false },
+            title = { Text("Display name") },
+            text = {
+                OutlinedTextField(
+                    value = nameDraft,
+                    onValueChange = { updatedName: String -> nameDraft = updatedName },
+                    label = { Text("Name") }
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        editName = false
+                        viewModel.saveName(nameDraft)
+                    }
+                ) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { editName = false }) { Text("Cancel") }
+            }
+        )
+    }
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Delete account and data?") },
+            text = { Text("This permanently removes your account and its cloud practice data.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmDelete = false
+                        viewModel.deleteAccount()
+                    }
+                ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) { Text("Cancel") }
+            }
+        )
+    }
     (state.error ?: state.message)?.let { Text(it, Modifier.padding(16.dp), color = if(state.error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary) }
 }
 

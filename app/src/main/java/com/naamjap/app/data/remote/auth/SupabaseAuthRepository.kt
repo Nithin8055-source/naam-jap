@@ -4,7 +4,7 @@ import com.naamjap.app.data.remote.SupabaseProvider
 import com.naamjap.app.domain.model.AccountIdentity
 import com.naamjap.app.domain.repository.AuthRepository
 import com.naamjap.app.domain.repository.AuthSessionState
-import io.github.jan.supabase.auth.providers.Email
+import io.github.jan.supabase.auth.providers.builtin.Email
 import io.github.jan.supabase.auth.status.SessionStatus
 import javax.inject.Inject
 import javax.inject.Singleton

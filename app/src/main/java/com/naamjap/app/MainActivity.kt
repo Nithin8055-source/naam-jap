@@ -35,7 +35,7 @@ import com.naamjap.app.domain.repository.AuthSessionState
 import com.naamjap.app.ui.theme.NaamJapTheme
 import com.naamjap.app.ui.theme.ThemeChoice
 import javax.inject.Inject
-import io.github.jan.supabase.handleDeeplinks
+import io.github.jan.supabase.auth.handleDeeplinks
 import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint

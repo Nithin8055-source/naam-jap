@@ -36,9 +36,15 @@ import com.naamjap.app.feature.jap.ManualRecordScreen
 import com.naamjap.app.ui.components.GlassBottomBar
 import com.naamjap.app.ui.components.PremiumScaffold
 import com.naamjap.app.ui.theme.ThemeChoice
+import com.naamjap.app.domain.model.AccountIdentity
 
 @Composable
-fun NaamJapApp(themeChoice: ThemeChoice, onThemeChoice: (ThemeChoice) -> Unit) {
+fun NaamJapApp(
+    themeChoice: ThemeChoice,
+    onThemeChoice: (ThemeChoice) -> Unit,
+    account: AccountIdentity,
+    onSignOut: () -> Unit
+) {
     val navController = rememberNavController()
     val hazeState = remember { HazeState() }
     val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
@@ -97,7 +103,7 @@ fun NaamJapApp(themeChoice: ThemeChoice, onThemeChoice: (ThemeChoice) -> Unit) {
             composable(Destination.Jap.route) { JapScreen() }
             composable(Destination.History.route) { HistoryScreen() }
             composable(Destination.Insights.route) { InsightsScreen() }
-            composable(Destination.Settings.route) { SettingsScreen(themeChoice = themeChoice, onThemeChoice = onThemeChoice) }
+            composable(Destination.Settings.route) { SettingsScreen(themeChoice = themeChoice, onThemeChoice = onThemeChoice, account = account, onSignOut = onSignOut) }
             composable(Destination.ManualRecord.route) { ManualRecordScreen(onBack = { navController.popBackStack() }) }
         }
     }

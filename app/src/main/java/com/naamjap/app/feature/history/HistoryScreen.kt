@@ -24,8 +24,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.time.LocalDate
@@ -36,19 +38,19 @@ import com.naamjap.app.ui.theme.JapSpacing
 import com.naamjap.app.ui.theme.NaamJapTheme
 import androidx.compose.ui.tooling.preview.Preview
 
-data class HistoryActivityUiModel(val title: String, val count: String, val time: String, val recordType: String)
-data class HistoryUiState(val records: List<HistoryActivityUiModel> = emptyList())
+data class HistoryUiState(val records: List<com.naamjap.app.domain.repository.PracticeHistoryItem> = emptyList(), val error: String? = null)
 
 @HiltViewModel
-class HistoryViewModel @Inject constructor() : ViewModel() {
+class HistoryViewModel @Inject constructor(private val repository: com.naamjap.app.domain.repository.PracticeRepository) : ViewModel() {
     private val _state = MutableStateFlow(HistoryUiState())
     val state: StateFlow<HistoryUiState> = _state
+    init { viewModelScope.launch { try { repository.refresh(java.time.ZoneId.systemDefault().id); _state.value = HistoryUiState(repository.loadHistoryPage(0, 100)) } catch (_: Exception) { _state.value = HistoryUiState(error="History could not be loaded.") } } }
 }
 
 @Preview(showBackground = true)
 @Composable
 private fun HistoryScreenPreview() {
-    NaamJapTheme { HistoryScreen(viewModel = HistoryViewModel()) }
+    NaamJapTheme { Text("History") }
 }
 
 @Composable
@@ -93,27 +95,28 @@ fun HistoryScreen(viewModel: HistoryViewModel = hiltViewModel()) {
                         }
                     }
                 }
-                Text("No activity indicators until you add records.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(if (state.records.any { it.date.month == displayedMonth.month && it.date.year == displayedMonth.year }) "Activity is available for this month." else "No activity recorded for this month.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         Spacer(Modifier.height(JapSpacing.lg))
         Text(LocalDate.parse(selectedDate).format(DateTimeFormatter.ofPattern("MMMM d, yyyy")), style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(JapSpacing.sm))
         Row(horizontalArrangement = Arrangement.spacedBy(JapSpacing.sm)) {
-            StatCard("Total Naam Jap", "—", Modifier.weight(1f))
-            StatCard("Sessions", "—", Modifier.weight(1f))
+            StatCard("Total Naam Jap", state.records.filter { it.date == LocalDate.parse(selectedDate) }.sumOf { it.count }.toString(), Modifier.weight(1f))
+            StatCard("Sessions", state.records.count { it.date == LocalDate.parse(selectedDate) && it.isSession }.toString(), Modifier.weight(1f))
         }
         Spacer(Modifier.height(JapSpacing.lg))
         SectionHeader("Activity")
         Spacer(Modifier.height(JapSpacing.xs))
         GlassSurface(Modifier.fillMaxWidth()) {
-            if (state.records.isEmpty()) {
+            val selectedRecords = state.records.filter { it.date == LocalDate.parse(selectedDate) }
+            if (selectedRecords.isEmpty()) {
                 EmptyState("No records for this day", "When you add practice records, sessions and manual entries will appear here.")
             } else {
                 LazyColumn(Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
-                    itemsIndexed(state.records) { index, record ->
+                    itemsIndexed(selectedRecords) { index, record ->
                         if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .6f))
-                        SessionRow(record.title, record.count, record.time, record.recordType)
+                        SessionRow(record.naamName, record.count.toString(), record.date.toString(), if (record.isSession) "Session" else "Manual")
                     }
                 }
             }

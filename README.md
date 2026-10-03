@@ -8,7 +8,15 @@ Native Android application for Naam Jap, built with Kotlin, Jetpack Compose and 
 - Android SDK Platform 35 and platform tools
 - Android Studio or JDK 17 for local builds; the checked-in Gradle Wrapper downloads Gradle 8.11.1 automatically
 
-The app supports Android 8.0 (API 26) and newer. No credentials, network permissions, or backend services are required for the current UI phase.
+The app supports Android 8.0 (API 26) and newer. Supabase email authentication and authenticated cloud practice storage are implemented.
+
+## Supabase setup
+
+Gradle resolves `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` in this order: Gradle properties, environment variables, ignored `local.properties`, then `local.properties.example`. Copy the example to `local.properties` to override its defaults locally; `local.properties` is ignored by Git. Gradle rejects keys that do not use Supabase's `sb_publishable_` format. Never put a secret or `service_role` key in the Android app.
+
+For GitHub Actions builds, add repository Secrets named `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY`; the workflow passes them to Gradle without printing them. Add `com.naamjap.app://auth-callback` to the Supabase project's allowed redirect URLs for email confirmation and password recovery. The app uses this callback for PKCE auth links.
+
+The existing practice columns and RLS policies have been verified. Before using cloud practice, profile, or account deletion features, review [`supabase/phase3_predeploy_checks.sql`](supabase/phase3_predeploy_checks.sql) and then apply [`supabase/migrations/202610030001_phase3_profile_and_session_rpc.sql`](supabase/migrations/202610030001_phase3_profile_and_session_rpc.sql) in a backed-up Supabase project. The migration preserves existing rows and policies; it adds profile/session-link columns, ownership/uniqueness constraints, event receipts, and authenticated RPCs. Existing completed sessions are not guessed into the record ledger; use the reviewed [`supabase/phase3_legacy_session_reconciliation_template.sql`](supabase/phase3_legacy_session_reconciliation_template.sql) where needed.
 
 ## Build
 
@@ -48,7 +56,7 @@ Replace the remote URL with the HTTPS URL of an empty GitHub repository. If a re
 - `ui/theme`: centralized light/dark colors, typography, shapes, and spacing tokens
 - `ui/components`: reusable glass navigation, surfaces, cards, actions, goal progress, inputs, and empty states
 
-The five primary screens and manual record form are UI foundations. Theme selection updates immediately and is saved with the Activity's UI state, but is not stored as a durable preference. The dashboard/history start with empty user data; the Insights chart uses values explicitly labeled as sample preview only. Jap, manual record save, and future preference controls do not persist data or run a counting engine.
+The Jap counter, manual records, home dashboard, history, profile editing, naam types, daily goal, sign out, and account deletion use authenticated Supabase operations. Session event receipts support retry-safe count actions and derive pause-aware elapsed time without adding columns to `jap_sessions`. Insights still uses illustrative preview data; daily-goal rows have no effective date, so the verified schema supports one current goal per account rather than per-day goal history. Theme preference remains stored in DataStore.
 
 ## Next phases
 

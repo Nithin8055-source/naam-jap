@@ -4,6 +4,8 @@ import android.os.Bundle
 import android.os.Build
 import android.os.SystemClock
 import android.graphics.Color as AndroidColor
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -24,23 +26,36 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import com.naamjap.app.navigation.NaamJapApp
+import com.naamjap.app.feature.auth.AuthScreen
+import com.naamjap.app.feature.auth.AuthViewModel
 import com.naamjap.app.feature.splash.SplashWallpaperScreen
 import com.naamjap.app.feature.settings.ThemeViewModel
+import com.naamjap.app.data.remote.SupabaseProvider
+import com.naamjap.app.domain.repository.AuthSessionState
 import com.naamjap.app.ui.theme.NaamJapTheme
 import com.naamjap.app.ui.theme.ThemeChoice
+import javax.inject.Inject
+import io.github.jan.supabase.handleDeeplinks
 import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     private val themePreferenceLoaded = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val authDeepLink = mutableStateOf<Uri?>(null)
+
+    @Inject lateinit var supabaseProvider: SupabaseProvider
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen().setKeepOnScreenCondition { !themePreferenceLoaded.get() }
         super.onCreate(savedInstanceState)
+        authDeepLink.value = intent?.data
+        intent?.let { supabaseProvider.client?.handleDeeplinks(it) }
         enableEdgeToEdge()
         setContent {
             val themeViewModel: ThemeViewModel = hiltViewModel()
             val themeState by themeViewModel.uiState.collectAsStateWithLifecycle()
+            val authViewModel: AuthViewModel = hiltViewModel()
+            val authSession by authViewModel.sessionState.collectAsStateWithLifecycle()
             var showOpeningWallpaper by rememberSaveable { mutableStateOf(savedInstanceState == null) }
             var openingStartedAt by rememberSaveable { mutableLongStateOf(0L) }
             val themeChoice = if (themeState.isLoaded) themeState.choice else ThemeChoice.SYSTEM
@@ -77,9 +92,33 @@ class MainActivity : ComponentActivity() {
                     label = "opening wallpaper transition"
                 ) { showSplash ->
                     if (showSplash) SplashWallpaperScreen(darkTheme)
-                    else NaamJapApp(themeChoice = themeChoice, onThemeChoice = themeViewModel::selectTheme)
+                    else {
+                        val isPasswordRecovery = authDeepLink.value?.getQueryParameter("type") == "recovery"
+                        when {
+                            isPasswordRecovery -> AuthScreen(
+                                viewModel = authViewModel,
+                                passwordRecovery = true,
+                                onPasswordRecoveryComplete = { authDeepLink.value = null }
+                            )
+                            authSession is AuthSessionState.Checking -> SplashWallpaperScreen(darkTheme)
+                            authSession is AuthSessionState.SignedIn -> NaamJapApp(
+                                themeChoice = themeChoice,
+                                onThemeChoice = themeViewModel::selectTheme,
+                                account = (authSession as AuthSessionState.SignedIn).account,
+                                onSignOut = authViewModel::signOut
+                            )
+                            else -> AuthScreen(viewModel = authViewModel)
+                        }
+                    }
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        authDeepLink.value = intent.data
+        supabaseProvider.client?.handleDeeplinks(intent)
     }
 }

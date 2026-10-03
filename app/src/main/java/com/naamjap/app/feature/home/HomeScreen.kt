@@ -1,98 +1,57 @@
 package com.naamjap.app.feature.home
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.Image
-import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.SelfImprovement
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import dagger.hilt.android.lifecycle.HiltViewModel
-import javax.inject.Inject
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewModelScope
+import com.naamjap.app.domain.repository.PracticeRepository
 import com.naamjap.app.ui.components.*
 import com.naamjap.app.ui.theme.JapSpacing
-import com.naamjap.app.ui.theme.NaamJapTheme
-import com.naamjap.app.navigation.Destination
-import com.naamjap.app.R
-import androidx.compose.ui.tooling.preview.Preview
-
-data class HomeUiState(val greeting: String = "Good morning", val todayCount: Int = 0)
+import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 
 @HiltViewModel
-class HomeViewModel @Inject constructor() : ViewModel() {
-    private val _uiState = MutableStateFlow(HomeUiState())
-    val uiState: StateFlow<HomeUiState> = _uiState
+class HomeViewModel @Inject constructor(private val repository: PracticeRepository) : ViewModel() {
+    private val _history = MutableStateFlow(emptyList<com.naamjap.app.domain.repository.PracticeHistoryItem>())
+    val history = _history.asStateFlow()
+    val data = repository.state
+    init { viewModelScope.launch { runCatching { repository.refresh(java.time.ZoneId.systemDefault().id) }; runCatching { _history.value = repository.loadHistoryPage(0, 5) } } }
 }
 
 @Composable
 fun HomeScreen(onNavigate: (String) -> Unit, viewModel: HomeViewModel = hiltViewModel()) {
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
-    Box(Modifier.fillMaxSize()) {
-        Image(painterResource(R.drawable.bg_sunrise), null, Modifier.fillMaxSize().alpha(.18f), contentScale = ContentScale.Crop)
-        Image(painterResource(R.drawable.ic_mandala), null, Modifier.align(Alignment.TopEnd).offset(x = 42.dp, y = 112.dp).size(220.dp).alpha(.045f), contentScale = ContentScale.Fit)
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = JapSpacing.lg, top = JapSpacing.md, end = JapSpacing.lg, bottom = 104.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            NaamJapLogo(Modifier.size(76.dp).padding(end = 8.dp))
-            Column(Modifier.weight(1f)) {
-                Text(state.greeting, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("A quieter moment", style = MaterialTheme.typography.headlineMedium)
-                Text("Take a breath. Begin with one name.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            PremiumIconButton("Open settings", onClick = { onNavigate(Destination.Settings.route) }) {
-                Icon(Icons.Default.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+    val data by viewModel.data.collectAsStateWithLifecycle()
+    val recent by viewModel.history.collectAsStateWithLifecycle()
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Text("A quieter moment", style = MaterialTheme.typography.headlineMedium)
+        Text("Take a breath. Begin with one name.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        GlassSurface(Modifier.fillMaxWidth()) { Column(Modifier.padding(20.dp)) {
+            DailyCountDisplay(data.dashboard.todayCount.toString(), "Today's Naam Jap")
+            Spacer(Modifier.height(12.dp))
+            val goal = data.dashboard.dailyGoal.coerceAtLeast(1)
+            GoalProgressCard("${data.dashboard.dailyGoal} repetitions", ((data.dashboard.todayCount * 100 / goal).coerceAtMost(100)).toInt(), "${(goal-data.dashboard.todayCount).coerceAtLeast(0)} remaining", (data.dashboard.todayCount.toFloat()/goal).coerceIn(0f,1f))
+        } }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatCard("Current streak", "${data.dashboard.currentStreak} days", Modifier.weight(1f))
+            StatCard("Lifetime count", data.dashboard.lifetimeCount.toString(), Modifier.weight(1f))
         }
-        Spacer(Modifier.height(JapSpacing.xl))
-        GlassSurface(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(JapSpacing.lg), verticalArrangement = Arrangement.spacedBy(JapSpacing.md)) {
-                DailyCountDisplay(count = state.todayCount.toString(), supportingLabel = "Today's Naam Jap")
-                GoalProgressCard(goal = "Daily goal not set", percent = 0, remaining = "Set a goal when you are ready.", progress = 0f, showPercent = false)
-            }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatCard("Sessions today", data.dashboard.sessionsToday.toString(), Modifier.weight(1f))
+            StatCard("Naam types", data.naamTypes.size.toString(), Modifier.weight(1f))
         }
-        Spacer(Modifier.height(JapSpacing.md))
-        Row(horizontalArrangement = Arrangement.spacedBy(JapSpacing.sm)) {
-            StatCard("Current streak", "—", Modifier.weight(1f))
-            StatCard("Lifetime count", "—", Modifier.weight(1f))
-            StatCard("Sessions today", "—", Modifier.weight(1f))
-        }
-        Spacer(Modifier.height(JapSpacing.xl))
-        SectionHeader("Quick actions")
-        Spacer(Modifier.height(JapSpacing.sm))
-        Row(horizontalArrangement = Arrangement.spacedBy(JapSpacing.sm)) {
-            QuickActionItem("Start Jap", "Begin a session", onClick = { onNavigate(Destination.Jap.route) }, icon = { Icon(Icons.Default.SelfImprovement, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, modifier = Modifier.weight(1f))
-            QuickActionItem("Add record", "Manual entry", onClick = { onNavigate(Destination.ManualRecord.route) }, icon = { Icon(Icons.Default.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, modifier = Modifier.weight(1f))
-        }
-        Spacer(Modifier.height(JapSpacing.sm))
-        QuickActionItem("View history", "Browse daily practice", onClick = { onNavigate(Destination.History.route) }, icon = { Icon(Icons.Default.History, contentDescription = null, tint = MaterialTheme.colorScheme.primary) })
-        Spacer(Modifier.height(JapSpacing.xl))
-        OrnamentalDivider(Modifier.fillMaxWidth().height(24.dp))
-        Spacer(Modifier.height(JapSpacing.md))
-        SectionHeader("Recent activity", action = "View all", onAction = { onNavigate(Destination.History.route) })
-        Spacer(Modifier.height(JapSpacing.xs))
-        GlassSurface(Modifier.fillMaxWidth()) { EmptyState("Your practice begins here", "Completed sessions will appear in this space.") }
-        }
+        SectionHeader("Recent activity", action = "View all", onAction = { onNavigate("history") })
+        if (recent.isEmpty()) EmptyState("Your practice begins here", "Completed sessions and manual records appear here.")
+        else recent.forEach { SessionRow(it.naamName, it.count.toString(), it.date.toString(), if (it.isSession) "Session" else "Manual") }
+        data.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun HomeScreenPreview() {
-    NaamJapTheme { HomeScreen(onNavigate = {}, viewModel = HomeViewModel()) }
 }

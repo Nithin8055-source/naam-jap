@@ -37,6 +37,9 @@ jobs:
 
       - name: Build and test
         run: ./gradlew assembleDebug testDebugUnitTest
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4

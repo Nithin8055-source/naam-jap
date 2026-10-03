@@ -23,6 +23,7 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -230,7 +231,6 @@ fun ThemePreview(label: String, selected: Boolean, onClick: () -> Unit, icon: @C
 @Composable
 fun GlassBottomBar(selectedRoute: String?, onSelect: (Destination) -> Unit, modifier: Modifier = Modifier, hazeState: HazeState? = null) {
     val haptics = LocalHapticFeedback.current
-    val glassBackdropTint = MaterialTheme.colorScheme.surface.copy(alpha = .44f)
     Box(modifier.fillMaxWidth()) {
         Box(
             Modifier.align(Alignment.Center).fillMaxWidth(.94f).height(70.dp)
@@ -240,17 +240,17 @@ fun GlassBottomBar(selectedRoute: String?, onSelect: (Destination) -> Unit, modi
         )
         Surface(
             modifier = Modifier.fillMaxWidth().clip(CircleShape).hazeEffect(state = hazeState) {
-                backgroundColor = glassBackdropTint
+                backgroundColor = Color.Transparent
                 blurRadius = 22.dp
                 noiseFactor = 0f
             },
             shape = CircleShape,
-            color = MaterialTheme.colorScheme.surface.copy(alpha = .30f),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .82f)),
-            shadowElevation = 14.dp,
+            color = MaterialTheme.colorScheme.surface.copy(alpha = .62f),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = .32f)),
+            shadowElevation = 12.dp,
             tonalElevation = 0.dp
         ) {
-            BoxWithConstraints(Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(MaterialTheme.colorScheme.onSurface.copy(alpha = .035f), MaterialTheme.colorScheme.surface.copy(alpha = 0f)))).padding(horizontal = 5.dp, vertical = 6.dp)) {
+            BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 5.dp, vertical = 6.dp)) {
                 val itemWidth = maxWidth / Destination.primary.size
                 val selectedIndex = Destination.primary.indexOfFirst { it.route == selectedRoute }.coerceAtLeast(0)
                 val indicatorX by animateDpAsState(itemWidth * selectedIndex.toFloat(), label = "nav indicator position")

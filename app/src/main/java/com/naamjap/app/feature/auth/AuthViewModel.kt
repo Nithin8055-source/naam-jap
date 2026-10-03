@@ -24,7 +24,7 @@ data class AuthActionState(
 
 @HiltViewModel
 class AuthViewModel @Inject constructor(
-    repository: AuthRepository
+    private val repository: AuthRepository
 ) : ViewModel() {
     val sessionState = repository.sessionState.stateIn(
         viewModelScope,

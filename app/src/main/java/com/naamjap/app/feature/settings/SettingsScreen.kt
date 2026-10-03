@@ -113,7 +113,15 @@ fun SettingsScreen(
                     }
                 }
             )
-            practice.naamTypes.forEach { naam -> Row(verticalAlignment = Alignment.CenterVertically) { Text(naam.name, Modifier.weight(1f)); Text(if (naam.isDefault) "Default" else ""); if (!naam.isDefault) TextButton(onClick = { viewModel.setDefaultNaam(naam.id) }) { Text("Set default") } } }
+            for (naam in practice.naamTypes) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(naam.name, Modifier.weight(1f))
+                    Text(if (naam.isDefault) "Default" else "")
+                    if (!naam.isDefault) {
+                        TextButton(onClick = { viewModel.setDefaultNaam(naam.id) }) { Text("Set default") }
+                    }
+                }
+            }
         }
 
         SettingsSection("Account & privacy") {
@@ -181,7 +189,14 @@ fun SettingsScreen(
             }
         )
     }
-    (state.error ?: state.message)?.let { Text(it, Modifier.padding(16.dp), color = if(state.error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary) }
+    val statusMessage = state.error ?: state.message
+    if (statusMessage != null) {
+        Text(
+            text = statusMessage,
+            modifier = Modifier.padding(16.dp),
+            color = if (state.error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+        )
+    }
 }
 
 @Composable

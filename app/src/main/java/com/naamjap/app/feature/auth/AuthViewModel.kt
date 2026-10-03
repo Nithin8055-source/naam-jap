@@ -38,7 +38,10 @@ class AuthViewModel @Inject constructor(
 
     fun signIn(email: String, password: String) = perform(
         successMessage = "Signed in."
-    ) { repository.signIn(email, password) }
+    ) {
+        repository.signIn(email, password)
+        null
+    }
 
     fun signUp(name: String, email: String, password: String) = perform(
         successMessage = "Account created."
@@ -49,19 +52,24 @@ class AuthViewModel @Inject constructor(
 
     fun requestPasswordReset(email: String) = perform(
         successMessage = "If this email can receive a reset link, Supabase has sent one."
-    ) { repository.requestPasswordReset(email) }
+    ) {
+        repository.requestPasswordReset(email)
+        null
+    }
 
     fun updatePassword(password: String) = perform(
         successMessage = "Your password was updated."
-    ) { repository.updatePassword(password) }
+    ) {
+        repository.updatePassword(password)
+        null
+    }
 
-    fun signOut() = perform(successMessage = "Signed out.") { repository.signOut() }
+    fun signOut() = perform(successMessage = "Signed out.") {
+        repository.signOut()
+        null
+    }
 
     fun clearMessage() = _actionState.update { it.copy(message = null, isError = false) }
-
-    private fun perform(successMessage: String, action: suspend () -> Unit) {
-        perform(successMessage) { action(); null }
-    }
 
     private fun perform(successMessage: String, action: suspend () -> String?) {
         if (!actionMutex.tryLock()) return

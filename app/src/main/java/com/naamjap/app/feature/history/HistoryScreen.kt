@@ -1,0 +1,122 @@
+package com.naamjap.app.feature.history
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.ViewModel
+import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import java.time.LocalDate
+import java.time.YearMonth
+import java.time.format.DateTimeFormatter
+import com.naamjap.app.ui.components.*
+import com.naamjap.app.ui.theme.JapSpacing
+import com.naamjap.app.ui.theme.NaamJapTheme
+import androidx.compose.ui.tooling.preview.Preview
+
+data class HistoryActivityUiModel(val title: String, val count: String, val time: String, val recordType: String)
+data class HistoryUiState(val records: List<HistoryActivityUiModel> = emptyList())
+
+@HiltViewModel
+class HistoryViewModel @Inject constructor() : ViewModel() {
+    private val _state = MutableStateFlow(HistoryUiState())
+    val state: StateFlow<HistoryUiState> = _state
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun HistoryScreenPreview() {
+    NaamJapTheme { HistoryScreen(viewModel = HistoryViewModel()) }
+}
+
+@Composable
+fun HistoryScreen(viewModel: HistoryViewModel = hiltViewModel()) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    val today = remember { LocalDate.now() }
+    var month by rememberSaveable { mutableStateOf(YearMonth.from(today).toString()) }
+    var selectedDate by rememberSaveable { mutableStateOf(today.toString()) }
+    val displayedMonth = YearMonth.parse(month)
+    val formatter = remember { DateTimeFormatter.ofPattern("MMMM yyyy") }
+    val leadingBlanks = displayedMonth.atDay(1).dayOfWeek.value - 1
+    val days = (1..displayedMonth.lengthOfMonth()).toList()
+    val cells = List(leadingBlanks) { 0 } + days
+    val weeks = cells.chunked(7).map { week -> week + List(7 - week.size) { 0 } }
+
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = JapSpacing.lg, vertical = JapSpacing.md)) {
+        Text("Your practice", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("History", style = MaterialTheme.typography.headlineLarge)
+        Spacer(Modifier.height(JapSpacing.lg))
+        GlassSurface(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(JapSpacing.md), verticalArrangement = Arrangement.spacedBy(JapSpacing.sm)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(displayedMonth.format(formatter), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                    IconButton(onClick = { val next = displayedMonth.minusMonths(1); month = next.toString(); selectedDate = next.atDay(1).toString() }, modifier = Modifier.size(48.dp)) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Previous month") }
+                    IconButton(onClick = { val next = displayedMonth.plusMonths(1); month = next.toString(); selectedDate = next.atDay(1).toString() }, modifier = Modifier.size(48.dp)) { Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "Next month") }
+                }
+                Row(Modifier.fillMaxWidth()) { listOf("M", "T", "W", "T", "F", "S", "S").forEachIndexed { index, day -> Box(Modifier.weight(1f).height(34.dp), contentAlignment = Alignment.Center) { Text(day, modifier = Modifier.semantics { contentDescription = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")[index] }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } } }
+                weeks.forEach { week ->
+                    Row(Modifier.fillMaxWidth()) {
+                        week.forEach { day ->
+                            val date = if (day == 0) null else displayedMonth.atDay(day)
+                            val isSelected = date?.toString() == selectedDate
+                            val isToday = date == today
+                            val foreground = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+                            Box(Modifier.weight(1f).height(48.dp), contentAlignment = Alignment.Center) {
+                                if (date != null) Box(Modifier.size(48.dp).clickable(role = Role.Button) { selectedDate = date.toString() }.semantics { contentDescription = date.format(DateTimeFormatter.ofPattern("MMMM d, yyyy")); selected = isSelected }, contentAlignment = Alignment.Center) {
+                                    Box(Modifier.size(36.dp).background(if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface, CircleShape))
+                                    Text(day.toString(), color = if (isSelected) foreground else MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelMedium)
+                                    if (isToday && !isSelected) Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 6.dp).size(4.dp).background(MaterialTheme.colorScheme.primary, CircleShape))
+                                }
+                            }
+                        }
+                    }
+                }
+                Text("No activity indicators until you add records.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Spacer(Modifier.height(JapSpacing.lg))
+        Text(LocalDate.parse(selectedDate).format(DateTimeFormatter.ofPattern("MMMM d, yyyy")), style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.height(JapSpacing.sm))
+        Row(horizontalArrangement = Arrangement.spacedBy(JapSpacing.sm)) {
+            StatCard("Total Naam Jap", "—", Modifier.weight(1f))
+            StatCard("Sessions", "—", Modifier.weight(1f))
+        }
+        Spacer(Modifier.height(JapSpacing.lg))
+        SectionHeader("Activity")
+        Spacer(Modifier.height(JapSpacing.xs))
+        GlassSurface(Modifier.fillMaxWidth()) {
+            if (state.records.isEmpty()) {
+                EmptyState("No records for this day", "When you add practice records, sessions and manual entries will appear here.")
+            } else {
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
+                    itemsIndexed(state.records) { index, record ->
+                        if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .6f))
+                        SessionRow(record.title, record.count, record.time, record.recordType)
+                    }
+                }
+            }
+        }
+    }
+}

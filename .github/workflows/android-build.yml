@@ -36,7 +36,7 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build and test
-        run: ./gradlew assembleDebug testDebugUnitTest
+        run: ./gradlew assembleDebug testDebugUnitTest --info --stacktrace
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}

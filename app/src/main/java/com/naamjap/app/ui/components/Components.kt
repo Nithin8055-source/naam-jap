@@ -6,19 +6,24 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.blur
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.SelfImprovement
 import androidx.compose.material3.*
+import androidx.compose.ui.res.painterResource
+import androidx.compose.foundation.Image
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -27,15 +32,50 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.naamjap.app.navigation.Destination
+import com.naamjap.app.R
 import com.naamjap.app.ui.theme.JapSpacing
 
 @Composable
 fun PremiumScaffold(bottomBar: @Composable () -> Unit, content: @Composable (PaddingValues) -> Unit) {
     Scaffold(containerColor = MaterialTheme.colorScheme.background, bottomBar = bottomBar, content = content)
+}
+
+@Composable
+fun LotusMark(modifier: Modifier = Modifier, contentDescription: String? = null) {
+    Image(
+        painter = painterResource(R.drawable.ic_golden_lotus),
+        contentDescription = contentDescription,
+        modifier = modifier,
+        contentScale = ContentScale.Fit
+    )
+}
+
+@Composable
+fun LotusOutlineMark(modifier: Modifier = Modifier, contentDescription: String? = null) {
+    Image(painterResource(R.drawable.ic_lotus_outline), contentDescription, modifier, contentScale = ContentScale.Fit)
+}
+
+@Composable
+fun NaamJapLogo(modifier: Modifier = Modifier, contentDescription: String? = "Naam Jap") {
+    Image(painterResource(R.drawable.ic_naam_jap_logo), contentDescription, modifier, contentScale = ContentScale.Fit)
+}
+
+@Composable
+fun OmSymbol(modifier: Modifier = Modifier, contentDescription: String? = "Om") {
+    Image(painterResource(R.drawable.ic_om_symbol), contentDescription, modifier, contentScale = ContentScale.Fit)
+}
+
+@Composable
+fun OrnamentalDivider(modifier: Modifier = Modifier) {
+    Image(
+        painter = painterResource(R.drawable.ic_ornamental_divider),
+        contentDescription = null,
+        modifier = modifier.alpha(.72f),
+        contentScale = ContentScale.Fit
+    )
 }
 
 @Composable
@@ -159,7 +199,7 @@ fun PremiumIconButton(description: String, onClick: () -> Unit, content: @Compos
 @Composable
 fun EmptyState(title: String, message: String, modifier: Modifier = Modifier) {
     Column(modifier.fillMaxWidth().padding(vertical = JapSpacing.xl, horizontal = JapSpacing.lg), horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(Icons.Default.SelfImprovement, contentDescription = null, tint = MaterialTheme.colorScheme.primary.copy(alpha = .75f), modifier = Modifier.size(30.dp))
+        LotusOutlineMark(Modifier.size(48.dp), null)
         Spacer(Modifier.height(JapSpacing.sm))
         Text(title, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
         Spacer(Modifier.height(JapSpacing.xs))
@@ -181,26 +221,41 @@ fun ThemePreview(label: String, selected: Boolean, onClick: () -> Unit, icon: @C
 @Composable
 fun GlassBottomBar(selectedRoute: String?, onSelect: (Destination) -> Unit, modifier: Modifier = Modifier) {
     val haptics = LocalHapticFeedback.current
-    Surface(modifier = modifier.fillMaxWidth(), shape = CircleShape, color = MaterialTheme.colorScheme.surface.copy(alpha = .86f), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .74f)), shadowElevation = 12.dp, tonalElevation = 3.dp) {
-        BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 5.dp, vertical = 6.dp)) {
-            val itemWidth = maxWidth / Destination.primary.size
-            val selectedIndex = Destination.primary.indexOfFirst { it.route == selectedRoute }.coerceAtLeast(0)
-            val indicatorX by animateDpAsState(itemWidth * selectedIndex.toFloat(), label = "nav indicator position")
-            Box(Modifier.align(Alignment.CenterStart).offset(x = indicatorX).width(itemWidth).height(46.dp).padding(horizontal = 2.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary.copy(alpha = .12f)))
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Destination.primary.forEach { destination ->
-                    val selected = selectedRoute == destination.route
-                    val tint by animateColorAsState(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, label = "nav icon tint")
-                    val scale by animateFloatAsState(if (selected) 1.06f else 1f, label = "nav icon scale")
-                    Column(
-                        Modifier.weight(1f).clip(CircleShape).clickable(role = Role.Tab, onClickLabel = "Open ${destination.label}") { if (!selected) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove); onSelect(destination) }.semantics { this.selected = selected }.padding(horizontal = 2.dp, vertical = 5.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(3.dp)
-                    ) {
-                        Box(Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 30.dp).scale(scale).padding(horizontal = 12.dp, vertical = 4.dp), contentAlignment = Alignment.Center) {
-                            Icon(destination.icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+    Box(modifier.fillMaxWidth()) {
+        Box(
+            Modifier.align(Alignment.Center).fillMaxWidth(.94f).height(70.dp)
+                .clip(CircleShape)
+                .background(Brush.horizontalGradient(listOf(MaterialTheme.colorScheme.primary.copy(alpha = .20f), MaterialTheme.colorScheme.secondary.copy(alpha = .16f), MaterialTheme.colorScheme.primary.copy(alpha = .18f))))
+                .blur(18.dp)
+        )
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surface.copy(alpha = .72f),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .82f)),
+            shadowElevation = 14.dp,
+            tonalElevation = 4.dp
+        ) {
+            BoxWithConstraints(Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(MaterialTheme.colorScheme.onSurface.copy(alpha = .035f), MaterialTheme.colorScheme.surface.copy(alpha = 0f)))).padding(horizontal = 5.dp, vertical = 6.dp)) {
+                val itemWidth = maxWidth / Destination.primary.size
+                val selectedIndex = Destination.primary.indexOfFirst { it.route == selectedRoute }.coerceAtLeast(0)
+                val indicatorX by animateDpAsState(itemWidth * selectedIndex.toFloat(), label = "nav indicator position")
+                Box(Modifier.align(Alignment.CenterStart).offset(x = indicatorX).width(itemWidth).height(46.dp).padding(horizontal = 2.dp).clip(CircleShape).background(Brush.horizontalGradient(listOf(MaterialTheme.colorScheme.primary.copy(alpha = .20f), MaterialTheme.colorScheme.secondary.copy(alpha = .16f), MaterialTheme.colorScheme.primary.copy(alpha = .20f)))))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Destination.primary.forEach { destination ->
+                        val selected = selectedRoute == destination.route
+                        val tint by animateColorAsState(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, label = "nav icon tint")
+                        val scale by animateFloatAsState(if (selected) 1.06f else 1f, label = "nav icon scale")
+                        Column(
+                            Modifier.weight(1f).clip(CircleShape).clickable(role = Role.Tab, onClickLabel = "Open ${destination.label}") { if (!selected) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove); onSelect(destination) }.semantics { this.selected = selected }.padding(horizontal = 2.dp, vertical = 5.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Box(Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 30.dp).scale(scale).padding(horizontal = 12.dp, vertical = 4.dp), contentAlignment = Alignment.Center) {
+                                Icon(destination.icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+                            }
+                            Text(destination.label, color = tint, style = MaterialTheme.typography.labelSmall, maxLines = 1)
                         }
-                        Text(destination.label, color = tint, style = MaterialTheme.typography.labelSmall, maxLines = 1)
                     }
                 }
             }

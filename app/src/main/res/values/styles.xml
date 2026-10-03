@@ -6,4 +6,10 @@
         <item name="android:navigationBarColor">#FFF9F1</item>
         <item name="android:windowLightNavigationBar">true</item>
     </style>
+
+    <style name="Theme.NaamJap.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_golden_lotus_launcher</item>
+        <item name="postSplashScreenTheme">@style/Theme.NaamJap</item>
+    </style>
 </resources>

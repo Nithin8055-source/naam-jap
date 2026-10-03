@@ -47,7 +47,7 @@ fun SettingsScreen(themeChoice: ThemeChoice, onThemeChoice: (ThemeChoice) -> Uni
         GlassSurface(Modifier.fillMaxWidth()) {
             Row(Modifier.padding(JapSpacing.md), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(JapSpacing.md)) {
                 Surface(shape = androidx.compose.foundation.shape.CircleShape, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(52.dp)) {
-                    Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Spa, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
+                    Box(contentAlignment = Alignment.Center) { LotusMark(Modifier.size(44.dp), "Naam Jap lotus logo") }
                 }
                 Column { Text(state.displayName, style = MaterialTheme.typography.titleMedium); Text(state.subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall) }
             }

@@ -1,6 +1,8 @@
 package com.naamjap.app.feature.home
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.Image
+import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -15,6 +17,8 @@ import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
@@ -26,6 +30,7 @@ import com.naamjap.app.ui.components.*
 import com.naamjap.app.ui.theme.JapSpacing
 import com.naamjap.app.ui.theme.NaamJapTheme
 import com.naamjap.app.navigation.Destination
+import com.naamjap.app.R
 import androidx.compose.ui.tooling.preview.Preview
 
 data class HomeUiState(val greeting: String = "Good morning", val todayCount: Int = 0)
@@ -39,8 +44,12 @@ class HomeViewModel @Inject constructor() : ViewModel() {
 @Composable
 fun HomeScreen(onNavigate: (String) -> Unit, viewModel: HomeViewModel = hiltViewModel()) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = JapSpacing.lg, vertical = JapSpacing.md)) {
+    Box(Modifier.fillMaxSize()) {
+        Image(painterResource(R.drawable.bg_sunrise), null, Modifier.fillMaxSize().alpha(.18f), contentScale = ContentScale.Crop)
+        Image(painterResource(R.drawable.ic_mandala), null, Modifier.align(Alignment.TopEnd).offset(x = 42.dp, y = 112.dp).size(220.dp).alpha(.045f), contentScale = ContentScale.Fit)
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = JapSpacing.lg, vertical = JapSpacing.md)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
+            NaamJapLogo(Modifier.size(58.dp).padding(end = 8.dp))
             Column(Modifier.weight(1f)) {
                 Text(state.greeting, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("A quieter moment", style = MaterialTheme.typography.headlineMedium)
@@ -73,9 +82,12 @@ fun HomeScreen(onNavigate: (String) -> Unit, viewModel: HomeViewModel = hiltView
         Spacer(Modifier.height(JapSpacing.sm))
         QuickActionItem("View history", "Browse daily practice", onClick = { onNavigate(Destination.History.route) }, icon = { Icon(Icons.Default.History, contentDescription = null, tint = MaterialTheme.colorScheme.primary) })
         Spacer(Modifier.height(JapSpacing.xl))
+        OrnamentalDivider(Modifier.fillMaxWidth().height(24.dp))
+        Spacer(Modifier.height(JapSpacing.md))
         SectionHeader("Recent activity", action = "View all", onAction = { onNavigate(Destination.History.route) })
         Spacer(Modifier.height(JapSpacing.xs))
         GlassSurface(Modifier.fillMaxWidth()) { EmptyState("Your practice begins here", "Completed sessions will appear in this space.") }
+        }
     }
 }
 

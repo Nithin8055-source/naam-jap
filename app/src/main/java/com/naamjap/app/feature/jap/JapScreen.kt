@@ -2,6 +2,7 @@ package com.naamjap.app.feature.jap
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.rememberScrollState
@@ -19,7 +20,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
@@ -37,6 +42,7 @@ import java.time.format.DateTimeFormatter
 import com.naamjap.app.ui.components.*
 import com.naamjap.app.ui.theme.JapSpacing
 import com.naamjap.app.ui.theme.NaamJapTheme
+import com.naamjap.app.R
 import androidx.compose.ui.tooling.preview.Preview
 
 data class JapUiState(val title: String = "Naam Jap", val count: Int = 0)
@@ -61,18 +67,21 @@ fun JapScreen(viewModel: JapViewModel = hiltViewModel()) {
             Spacer(Modifier.height(JapSpacing.xs))
             Text("Ready · UI preview", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(JapSpacing.xxl))
-            JapCircularProgressIndicator(progress = 0f, modifier = Modifier.size(272.dp), strokeWidth = 5.dp) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Icon(Icons.Default.Spa, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
-                    AnimatedContent(targetState = state.count, label = "preview count") { count -> Text(count.toString().padStart(3, '0'), style = MaterialTheme.typography.displayLarge) }
-                    Text("of 108 · mala preview", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Box(Modifier.size(300.dp), contentAlignment = Alignment.Center) {
+                Image(painterResource(R.drawable.ic_sacred_halo), null, Modifier.fillMaxSize().alpha(.13f), contentScale = ContentScale.Fit)
+                JapCircularProgressIndicator(progress = 0f, modifier = Modifier.size(272.dp), strokeWidth = 5.dp) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        OmSymbol(Modifier.size(28.dp), null)
+                        AnimatedContent(targetState = state.count, label = "preview count") { count -> Text(count.toString().padStart(3, '0'), style = MaterialTheme.typography.displayLarge) }
+                        Text("of 108 · mala preview", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             }
             Spacer(Modifier.height(JapSpacing.sm))
             Text("A calm space for your practice", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(JapSpacing.xxl))
             Button(onClick = { scope.launch { snackbarHostState.showSnackbar("Counting will be available in a future phase. No count was added.") } }, interactionSource = countInteraction, modifier = Modifier.size(84.dp).scale(countScale), shape = CircleShape, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary), elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)) {
-                Icon(Icons.Default.Spa, contentDescription = "Preview count action; does not add or save a count", modifier = Modifier.size(34.dp))
+                LotusMark(Modifier.size(34.dp), "Preview count action; does not add or save a count")
             }
             Spacer(Modifier.height(JapSpacing.xs))
             Text("Tap to count · preview only", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -85,10 +94,14 @@ fun JapScreen(viewModel: JapViewModel = hiltViewModel()) {
             Spacer(Modifier.height(JapSpacing.xl))
             GlassSurface(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(JapSpacing.md)) {
-                    Text("Session preview", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(JapSpacing.xs))
-                    Text("No active session", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("Elapsed time and session totals will appear here.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(JapSpacing.md)) {
+                        Image(painterResource(R.drawable.ic_mala_beads), "Mala beads", Modifier.size(48.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+                        Column {
+                            Text("Session preview", style = MaterialTheme.typography.titleMedium)
+                            Text("No active session", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("Elapsed time and session totals will appear here.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
                 }
             }
         }

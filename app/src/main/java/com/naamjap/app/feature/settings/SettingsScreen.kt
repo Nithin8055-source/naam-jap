@@ -38,12 +38,60 @@ class SettingsViewModel @Inject constructor(private val profiles: com.naamjap.ap
     val data = practice.state
     private val _state = MutableStateFlow(SettingsUiState())
     val state: StateFlow<SettingsUiState> = _state
-    init { viewModelScope.launch { runCatching { profiles.getCurrentProfile() }.onSuccess { p -> _state.value = _state.value.copy(displayName=p.displayName, subtitle=p.email.orEmpty()) }; runCatching { practice.refresh(java.time.ZoneId.systemDefault().id) } } }
-    fun saveName(name: String) = viewModelScope.launch { runCatching { profiles.updateProfile(name, null) }.onSuccess { _state.value = _state.value.copy(displayName=name.trim(), message="Profile saved.", error=null) }.onFailure { _state.value = _state.value.copy(error="Profile could not be saved.", message=null) } }
-    fun saveGoal(goal: String) = viewModelScope.launch { runCatching { practice.saveDailyGoal(goal.toLong()) }.onSuccess { _state.value = _state.value.copy(message="Daily goal saved.", error=null) }.onFailure { _state.value = _state.value.copy(error="Enter a valid goal and try again.", message=null) } }
-    fun addNaam(name: String) = viewModelScope.launch { runCatching { practice.createNaamType(name) }.onSuccess { practice.refresh(java.time.ZoneId.systemDefault().id); _state.value = _state.value.copy(message="Naam added.", error=null) }.onFailure { _state.value = _state.value.copy(error="Naam could not be added.", message=null) } }
-    fun setDefaultNaam(id: String) = viewModelScope.launch { runCatching { practice.setDefaultNaamType(id) }.onSuccess { practice.refresh(java.time.ZoneId.systemDefault().id) }.onFailure { _state.value = _state.value.copy(error="Default naam could not be changed.", message=null) } }
-    fun deleteAccount() = viewModelScope.launch { runCatching { profiles.deleteCurrentAccount() }.onFailure { _state.value = _state.value.copy(error="Account deletion could not be completed.") } }
+    init {
+        viewModelScope.launch {
+            try {
+                val profile = profiles.getCurrentProfile()
+                _state.value = _state.value.copy(displayName = profile.displayName, subtitle = profile.email.orEmpty())
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Profile details are optional here; the authenticated account remains visible as a fallback.
+            }
+            try {
+                practice.refresh(java.time.ZoneId.systemDefault().id)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // PracticeRepository exposes the sync error through its state.
+            }
+        }
+    }
+
+    fun saveName(name: String) = runAction("Profile could not be saved.") {
+        profiles.updateProfile(name, null)
+        _state.value = _state.value.copy(displayName = name.trim(), message = "Profile saved.", error = null)
+    }
+
+    fun saveGoal(goal: String) = runAction("Enter a valid goal and try again.") {
+        practice.saveDailyGoal(goal.toLong())
+        _state.value = _state.value.copy(message = "Daily goal saved.", error = null)
+    }
+
+    fun addNaam(name: String) = runAction("Naam could not be added.") {
+        practice.createNaamType(name)
+        practice.refresh(java.time.ZoneId.systemDefault().id)
+        _state.value = _state.value.copy(message = "Naam added.", error = null)
+    }
+
+    fun setDefaultNaam(id: String) = runAction("Default naam could not be changed.") {
+        practice.setDefaultNaamType(id)
+        practice.refresh(java.time.ZoneId.systemDefault().id)
+    }
+
+    fun deleteAccount() = runAction("Account deletion could not be completed.") {
+        profiles.deleteCurrentAccount()
+    }
+
+    private fun runAction(errorMessage: String, action: suspend () -> Unit) = viewModelScope.launch {
+        try {
+            action()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            _state.value = _state.value.copy(error = errorMessage, message = null)
+        }
+    }
 }
 
 @Preview(showBackground = true)

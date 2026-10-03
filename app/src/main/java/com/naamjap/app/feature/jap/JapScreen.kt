@@ -77,7 +77,7 @@ fun JapScreen(viewModel: JapViewModel = hiltViewModel()) {
                 JapCircularProgressIndicator(progress = 0f, modifier = Modifier.size(272.dp), strokeWidth = 5.dp) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         OmSymbol(Modifier.size(28.dp), null)
-                        AnimatedContent(targetState = active?.count?.toInt() ?: 0, label = "session count") { count -> Text(count.toString().padStart(3, '0'), style = MaterialTheme.typography.displayLarge) }
+                        AnimatedContent(targetState = active?.count ?: 0L, label = "session count") { count -> Text(count.toString().padStart(3, '0'), style = MaterialTheme.typography.displayLarge) }
                         Text(active?.naamName ?: "Select a naam below", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
@@ -86,7 +86,7 @@ fun JapScreen(viewModel: JapViewModel = hiltViewModel()) {
             Text("A calm space for your practice", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(JapSpacing.xxl))
             Button(onClick = { active?.let { viewModel.action(it.id, com.naamjap.app.domain.repository.SessionAction.INCREMENT) } }, enabled = active != null && !active.isPaused && !data.isSaving, interactionSource = countInteraction, modifier = Modifier.size(84.dp).scale(countScale), shape = CircleShape, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary), elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)) {
-                LotusMark(Modifier.size(34.dp), "Preview count action; does not add or save a count")
+                LotusMark(Modifier.size(34.dp), "Add one repetition")
             }
             Spacer(Modifier.height(JapSpacing.xs))
             Text(if (active == null) "Start a session to count" else "Tap to add one repetition", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)

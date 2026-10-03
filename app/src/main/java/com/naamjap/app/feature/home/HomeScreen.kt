@@ -39,7 +39,8 @@ fun HomeScreen(onNavigate: (String) -> Unit, viewModel: HomeViewModel = hiltView
             DailyCountDisplay(data.dashboard.todayCount.toString(), "Today's Naam Jap")
             Spacer(Modifier.height(12.dp))
             val goal = data.dashboard.dailyGoal.coerceAtLeast(1)
-            GoalProgressCard("${data.dashboard.dailyGoal} repetitions", ((data.dashboard.todayCount * 100 / goal).coerceAtMost(100)).toInt(), "${(goal-data.dashboard.todayCount).coerceAtLeast(0)} remaining", (data.dashboard.todayCount.toFloat()/goal).coerceIn(0f,1f))
+            val progress = (data.dashboard.todayCount.toDouble() / goal).coerceIn(0.0, 1.0)
+            GoalProgressCard("${data.dashboard.dailyGoal} repetitions", (progress * 100).toInt(), "${(goal-data.dashboard.todayCount).coerceAtLeast(0)} remaining", progress.toFloat())
         } }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             StatCard("Current streak", "${data.dashboard.currentStreak} days", Modifier.weight(1f))

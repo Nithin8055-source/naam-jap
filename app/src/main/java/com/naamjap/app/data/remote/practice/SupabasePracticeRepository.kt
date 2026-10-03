@@ -12,10 +12,9 @@ import com.naamjap.app.domain.repository.SessionAction
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.rpc
 import io.github.jan.supabase.postgrest.query.Order
-import io.github.jan.supabase.postgrest.result.decodeList
-import io.github.jan.supabase.postgrest.result.decodeSingle
 import java.time.Instant
 import java.time.LocalDate
 import java.time.OffsetDateTime

@@ -5,8 +5,8 @@ import com.naamjap.app.domain.model.UserProfile
 import com.naamjap.app.domain.repository.ProfileRepository
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.rpc
-import io.github.jan.supabase.postgrest.result.decodeSingle
 import java.time.Instant
 import kotlinx.coroutines.CancellationException
 import javax.inject.Inject

@@ -230,6 +230,7 @@ fun ThemePreview(label: String, selected: Boolean, onClick: () -> Unit, icon: @C
 @Composable
 fun GlassBottomBar(selectedRoute: String?, onSelect: (Destination) -> Unit, modifier: Modifier = Modifier, hazeState: HazeState? = null) {
     val haptics = LocalHapticFeedback.current
+    val glassBackdropTint = MaterialTheme.colorScheme.surface.copy(alpha = .44f)
     Box(modifier.fillMaxWidth()) {
         Box(
             Modifier.align(Alignment.Center).fillMaxWidth(.94f).height(70.dp)
@@ -239,7 +240,7 @@ fun GlassBottomBar(selectedRoute: String?, onSelect: (Destination) -> Unit, modi
         )
         Surface(
             modifier = Modifier.fillMaxWidth().clip(CircleShape).hazeEffect(state = hazeState) {
-                backgroundColor = MaterialTheme.colorScheme.surface.copy(alpha = .44f)
+                backgroundColor = glassBackdropTint
                 blurRadius = 22.dp
                 noiseFactor = 0f
             },

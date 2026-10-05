@@ -1,6 +1,8 @@
 package com.naamjap.app.data.remote.practice
 
 import com.naamjap.app.data.remote.SupabaseProvider
+import com.naamjap.app.data.remote.DatabaseOperationException
+import com.naamjap.app.data.remote.logSafeSupabaseFailure
 import com.naamjap.app.domain.model.PracticeRecord
 import com.naamjap.app.domain.repository.ActiveJapSession
 import com.naamjap.app.domain.repository.NaamType
@@ -15,6 +17,7 @@ import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.rpc
 import io.github.jan.supabase.postgrest.query.Order
+import io.github.jan.supabase.postgrest.query.Columns
 import java.time.Instant
 import java.time.LocalDate
 import java.time.OffsetDateTime
@@ -40,7 +43,8 @@ import kotlinx.serialization.Serializable
 
 @Singleton
 class SupabasePracticeRepository @Inject constructor(
-    private val provider: SupabaseProvider
+    private val provider: SupabaseProvider,
+    private val networkStatus: NetworkStatus
 ) : PracticeRepository {
     private val _state = MutableStateFlow(PracticeDataState())
     override val state: StateFlow<PracticeDataState> = _state.asStateFlow()
@@ -68,26 +72,32 @@ class SupabasePracticeRepository @Inject constructor(
     }
 
     override suspend fun refresh(timeZoneId: String) = loadMutex.withLock {
-        val userId = currentUserId()
-        resetForAccountIfNeeded(userId)
-        _state.value = _state.value.copy(isLoading = true, error = null, message = null)
+        _state.value = _state.value.copy(isLoading = true, error = null, canRetry = false, message = null)
         try {
+            val userId = currentUserId()
+            resetForAccountIfNeeded(userId)
             val zoneId = ZoneId.of(timeZoneId)
             val client = client()
             kotlinx.coroutines.coroutineScope {
             val names = async {
-                client.from("naam_types").select {
-                    filter { eq("user_id", userId) }
-                    order("created_at", Order.ASCENDING)
-                    limit(count = 500)
-                }.decodeList<NaamTypeRow>()
+                traced("naam_types.select") {
+                    client.from("naam_types").select(columns = Columns.list("id", "name", "is_default", "created_at")) {
+                        filter { eq("user_id", userId) }
+                        order("created_at", Order.ASCENDING)
+                        limit(count = 500)
+                    }.decodeList<NaamTypeRow>()
+                }
             }
             val activeSession = async {
-                client.postgrest.rpc("get_active_jap_session").decodeList<SessionRow>().firstOrNull()
+                traced("rpc.get_active_jap_session") {
+                    client.postgrest.rpc("get_active_jap_session").decodeList<SessionRow>().firstOrNull()
+                }
             }
             val dashboard = async {
-                client.postgrest.rpc("get_practice_dashboard", DashboardArgs(timeZoneId))
-                    .decodeList<DashboardRow>().firstOrNull()
+                traced("rpc.get_practice_dashboard") {
+                    client.postgrest.rpc("get_practice_dashboard", DashboardArgs(timeZoneId))
+                        .decodeList<DashboardRow>().firstOrNull()
+                }
             }
 
             val nameRows = names.await()
@@ -102,6 +112,7 @@ class SupabasePracticeRepository @Inject constructor(
                 isLoading = false,
                 hasLoaded = true,
                 error = null,
+                canRetry = false,
                 naamTypes = nameRows.map(NaamTypeRow::toDomain),
                 activeSession = active,
                 dashboard = statsRow?.toDomain() ?: PracticeDashboard()
@@ -113,7 +124,8 @@ class SupabasePracticeRepository @Inject constructor(
         } catch (error: Exception) {
             _state.value = _state.value.copy(
                 isLoading = false,
-                error = "Couldn't sync practice data. Check your connection and try again."
+                error = safeSupabaseError(error, networkStatus.hasValidatedInternet()),
+                canRetry = true
             )
             throw error
         }
@@ -124,17 +136,21 @@ class SupabasePracticeRepository @Inject constructor(
         val userId = currentUserId()
         val page = offset.toLong()..(offset + limit - 1).toLong()
         val client = client()
-        val nameRows = client.from("naam_types").select {
-            filter { eq("user_id", userId) }
-            limit(count = 500)
-        }.decodeList<NaamTypeRow>()
+        val nameRows = traced("history.naam_types.select") {
+            client.from("naam_types").select(columns = Columns.list("id", "name", "is_default")) {
+                filter { eq("user_id", userId) }
+                limit(count = 500)
+            }.decodeList<NaamTypeRow>()
+        }
         val naamById = nameRows.associate { it.id to it.name }
-        val records = client.from("jap_records").select {
-            filter { eq("user_id", userId) }
-            order("created_at", Order.DESCENDING)
-            order("id", Order.DESCENDING)
-            range(page)
-        }.decodeList<RecordRow>()
+        val records = traced("history.jap_records.select") {
+            client.from("jap_records").select(columns = Columns.list("id", "user_id", "naam_id", "count", "record_date", "notes", "created_at", "session_id")) {
+                filter { eq("user_id", userId) }
+                order("created_at", Order.DESCENDING)
+                order("id", Order.DESCENDING)
+                range(page)
+            }.decodeList<RecordRow>()
+        }
         val durations = sessionDurations(records.mapNotNull(RecordRow::sessionId))
         records.map { row ->
             PracticeHistoryItem(
@@ -152,7 +168,7 @@ class SupabasePracticeRepository @Inject constructor(
     }
 
     override suspend fun ensureDefaultNaamType(): NaamType = actionMutex.withLock {
-        val row = client().postgrest.rpc("ensure_default_naam_type").decodeList<NaamTypeRow>().single()
+        val row = traced("rpc.ensure_default_naam_type") { client().postgrest.rpc("ensure_default_naam_type").decodeList<NaamTypeRow>().single() }
         refresh(ZoneId.systemDefault().id)
         row.toDomain()
     }
@@ -161,13 +177,13 @@ class SupabasePracticeRepository @Inject constructor(
         val normalized = name.trim()
         require(normalized.length in 2..80) { "Enter a naam between 2 and 80 characters." }
         val request = CreateNaamArgs(UUID.randomUUID().toString(), normalized)
-        val row = client().postgrest.rpc("create_naam_type", request).decodeList<NaamTypeRow>().single()
+        val row = traced("rpc.create_naam_type") { client().postgrest.rpc("create_naam_type", request).decodeList<NaamTypeRow>().single() }
         refresh(ZoneId.systemDefault().id)
         row.toDomain()
     }
 
     override suspend fun setDefaultNaamType(id: String): NaamType = actionMutex.withLock {
-        val row = client().postgrest.rpc("set_default_naam_type", NaamIdArgs(id)).decodeList<NaamTypeRow>().single()
+        val row = traced("rpc.set_default_naam_type") { client().postgrest.rpc("set_default_naam_type", NaamIdArgs(id)).decodeList<NaamTypeRow>().single() }
         refresh(ZoneId.systemDefault().id)
         row.toDomain()
     }
@@ -178,19 +194,21 @@ class SupabasePracticeRepository @Inject constructor(
         val pending = pendingStart?.takeIf { it.naamId == naamId } ?: PendingStart(UUID.randomUUID().toString(), naamId).also { pendingStart = it }
         setSaving()
         try {
-            val row = client().postgrest.rpc(
-                "start_jap_session",
-                StartSessionArgs(operationId = pending.operationId, naamId = pending.naamId)
-            ).decodeList<SessionRow>().single()
+            val row = traced("rpc.start_jap_session") {
+                client().postgrest.rpc(
+                    "start_jap_session",
+                    StartSessionArgs(operationId = pending.operationId, naamId = pending.naamId)
+                ).decodeList<SessionRow>().single()
+            }
             pendingStart = null
-            runCatching { refresh(ZoneId.systemDefault().id) }
+            refreshAfterWrite()
             _state.value = _state.value.copy(message = "Session saved to your account.", error = null)
             _state.value.activeSession ?: row.toDomain(_state.value.naamTypes.associate { it.id to it.name }, SessionDuration(0, false))
         } catch (cancelled: CancellationException) {
             _state.value = _state.value.copy(isSaving = false)
             throw cancelled
         } catch (error: Exception) {
-            _state.value = _state.value.copy(isSaving = false, error = "Session wasn't confirmed. Tap start again to retry safely.")
+            _state.value = _state.value.copy(isSaving = false, error = safeSupabaseError(error, networkStatus.hasValidatedInternet()), canRetry = false)
             throw error
         }
     }
@@ -200,19 +218,21 @@ class SupabasePracticeRepository @Inject constructor(
             ?: PendingAction(UUID.randomUUID().toString(), sessionId, action).also { pendingAction = it }
         setSaving()
         try {
-            val row = client().postgrest.rpc(
-                "apply_jap_session_action",
-                SessionActionArgs(sessionId, pending.operationId, action.name.lowercase(), ZoneId.systemDefault().id)
-            ).decodeList<SessionRow>().single()
+            val row = traced("rpc.apply_jap_session_action") {
+                client().postgrest.rpc(
+                    "apply_jap_session_action",
+                    SessionActionArgs(sessionId, pending.operationId, action.name.lowercase(), ZoneId.systemDefault().id)
+                ).decodeList<SessionRow>().single()
+            }
             pendingAction = null
-            runCatching { refresh(ZoneId.systemDefault().id) }
+            refreshAfterWrite()
             _state.value = _state.value.copy(message = if (action == SessionAction.FINISH) "Session saved to your account." else "Cloud session updated.", error = null)
             _state.value.activeSession ?: row.toDomain(_state.value.naamTypes.associate { it.id to it.name }, SessionDuration(0, false))
         } catch (cancelled: CancellationException) {
             _state.value = _state.value.copy(isSaving = false)
             throw cancelled
         } catch (error: Exception) {
-            _state.value = _state.value.copy(isSaving = false, error = "Change wasn't confirmed. Tap the same action to retry safely.")
+            _state.value = _state.value.copy(isSaving = false, error = safeSupabaseError(error, networkStatus.hasValidatedInternet()), canRetry = false)
             throw error
         }
     }
@@ -222,24 +242,26 @@ class SupabasePracticeRepository @Inject constructor(
         val pendingId = pendingRecordIds.getOrPut(record.id) { record.id }
         setSaving()
         try {
-            client().postgrest.rpc(
-                "create_jap_record",
-                CreateRecordArgs(
-                    id = pendingId,
-                    naamId = naamId,
-                    count = record.count,
-                    recordDate = date.toString(),
-                    notes = record.note
-                )
-            ).decodeList<RecordRow>().single()
+            traced("rpc.create_jap_record") {
+                client().postgrest.rpc(
+                    "create_jap_record",
+                    CreateRecordArgs(
+                        id = pendingId,
+                        naamId = naamId,
+                        count = record.count,
+                        recordDate = date.toString(),
+                        notes = record.note
+                    )
+                ).decodeList<RecordRow>().single()
+            }
             pendingRecordIds.remove(record.id)
-            runCatching { refresh(ZoneId.systemDefault().id) }
+            refreshAfterWrite()
             _state.value = _state.value.copy(message = "Record saved to your account.", error = null)
         } catch (cancelled: CancellationException) {
             _state.value = _state.value.copy(isSaving = false)
             throw cancelled
         } catch (error: Exception) {
-            _state.value = _state.value.copy(isSaving = false, error = "Record wasn't confirmed. Retry the save to safely check it.")
+            _state.value = _state.value.copy(isSaving = false, error = safeSupabaseError(error, networkStatus.hasValidatedInternet()), canRetry = false)
             throw error
         }
     }
@@ -248,14 +270,16 @@ class SupabasePracticeRepository @Inject constructor(
         require(targetCount in 1..1_000_000_000) { "Daily goal is out of range." }
         setSaving()
         try {
-            client().postgrest.rpc("save_daily_goal", DailyGoalArgs(targetCount)).decodeList<DailyGoalRow>().single()
-            runCatching { refresh(ZoneId.systemDefault().id) }
+            traced("rpc.save_daily_goal") {
+                client().postgrest.rpc("save_daily_goal", DailyGoalArgs(targetCount)).decodeList<DailyGoalRow>().single()
+            }
+            refreshAfterWrite()
             _state.value = _state.value.copy(message = "Daily goal saved to your account.", error = null)
         } catch (cancelled: CancellationException) {
             _state.value = _state.value.copy(isSaving = false)
             throw cancelled
         } catch (error: Exception) {
-            _state.value = _state.value.copy(isSaving = false, error = "Daily goal wasn't confirmed. Please retry.")
+            _state.value = _state.value.copy(isSaving = false, error = safeSupabaseError(error, networkStatus.hasValidatedInternet()), canRetry = false)
             throw error
         }
     }
@@ -270,12 +294,37 @@ class SupabasePracticeRepository @Inject constructor(
 
     private suspend fun sessionDurations(sessionIds: List<String>): Map<String, SessionDuration> {
         if (sessionIds.isEmpty()) return emptyMap()
-        return client().postgrest.rpc("get_jap_session_durations", SessionIdsArgs(sessionIds))
-            .decodeList<SessionDurationRow>().associate { it.sessionId to SessionDuration(it.durationSeconds, it.isPaused) }
+        return traced("rpc.get_jap_session_durations") {
+            client().postgrest.rpc("get_jap_session_durations", SessionIdsArgs(sessionIds))
+                .decodeList<SessionDurationRow>().associate { it.sessionId to SessionDuration(it.durationSeconds, it.isPaused) }
+        }
+    }
+
+    private suspend fun <T> traced(operation: String, request: suspend () -> T): T = try {
+        request()
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (error: Exception) {
+        logSafeSupabaseFailure(operation, error)
+        _state.value = _state.value.copy(
+            error = safeSupabaseError(error, networkStatus.hasValidatedInternet()),
+            canRetry = operation.startsWith("rpc.get_") || operation.contains(".select")
+        )
+        throw DatabaseOperationException(operation, error)
+    }
+
+    private suspend fun refreshAfterWrite() {
+        try {
+            refresh(ZoneId.systemDefault().id)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // The successful write remains confirmed; refresh stores its own safe error and operation log.
+        }
     }
 
     private fun setSaving() {
-        _state.value = _state.value.copy(isSaving = true, error = null, message = null)
+        _state.value = _state.value.copy(isSaving = true, error = null, canRetry = false, message = null)
     }
 
     private fun resetForAccountIfNeeded(userId: String) {

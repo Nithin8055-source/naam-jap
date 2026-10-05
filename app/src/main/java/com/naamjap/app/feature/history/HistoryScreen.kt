@@ -34,6 +34,8 @@ import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import com.naamjap.app.ui.components.*
+import com.naamjap.app.data.remote.NetworkStatus
+import com.naamjap.app.data.remote.safeSupabaseError
 import com.naamjap.app.ui.theme.JapSpacing
 import com.naamjap.app.ui.theme.NaamJapTheme
 import androidx.compose.ui.tooling.preview.Preview
@@ -41,10 +43,23 @@ import androidx.compose.ui.tooling.preview.Preview
 data class HistoryUiState(val records: List<com.naamjap.app.domain.repository.PracticeHistoryItem> = emptyList(), val error: String? = null)
 
 @HiltViewModel
-class HistoryViewModel @Inject constructor(private val repository: com.naamjap.app.domain.repository.PracticeRepository) : ViewModel() {
+class HistoryViewModel @Inject constructor(
+    private val repository: com.naamjap.app.domain.repository.PracticeRepository,
+    private val networkStatus: NetworkStatus
+) : ViewModel() {
     private val _state = MutableStateFlow(HistoryUiState())
     val state: StateFlow<HistoryUiState> = _state
-    init { viewModelScope.launch { try { repository.refresh(java.time.ZoneId.systemDefault().id); _state.value = HistoryUiState(repository.loadHistoryPage(0, 100)) } catch (_: Exception) { _state.value = HistoryUiState(error="History could not be loaded.") } } }
+    init { refresh() }
+    fun refresh() { viewModelScope.launch {
+        try {
+            repository.refresh(java.time.ZoneId.systemDefault().id)
+            _state.value = HistoryUiState(repository.loadHistoryPage(0, 100))
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            _state.value = HistoryUiState(error = safeSupabaseError(error, networkStatus.hasValidatedInternet()))
+        }
+    } } }
 }
 
 @Preview(showBackground = true)
@@ -69,6 +84,14 @@ fun HistoryScreen(viewModel: HistoryViewModel = hiltViewModel()) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = JapSpacing.lg, top = JapSpacing.md, end = JapSpacing.lg, bottom = 104.dp)) {
         Text("Your practice", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text("History", style = MaterialTheme.typography.headlineLarge)
+        if (state.error != null) {
+            PremiumCard(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(JapSpacing.md), verticalArrangement = Arrangement.spacedBy(JapSpacing.xs)) {
+                    Text(state.error.orEmpty(), color = MaterialTheme.colorScheme.error)
+                    TextButton(onClick = viewModel::refresh) { Text("Retry") }
+                }
+            }
+        }
         Spacer(Modifier.height(JapSpacing.lg))
         GlassSurface(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(JapSpacing.md), verticalArrangement = Arrangement.spacedBy(JapSpacing.sm)) {

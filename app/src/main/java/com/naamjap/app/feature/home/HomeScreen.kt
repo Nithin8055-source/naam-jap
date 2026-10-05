@@ -1,58 +1,140 @@
 package com.naamjap.app.feature.home
 
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.naamjap.app.domain.repository.PracticeHistoryItem
 import com.naamjap.app.domain.repository.PracticeRepository
-import com.naamjap.app.ui.components.*
+import com.naamjap.app.ui.components.DailyCountDisplay
+import com.naamjap.app.ui.components.EmptyState
+import com.naamjap.app.ui.components.GlassSurface
+import com.naamjap.app.ui.components.GoalProgressCard
+import com.naamjap.app.ui.components.PremiumCard
+import com.naamjap.app.ui.components.SectionHeader
+import com.naamjap.app.ui.components.SessionRow
+import com.naamjap.app.ui.components.StatCard
 import com.naamjap.app.ui.theme.JapSpacing
 import dagger.hilt.android.lifecycle.HiltViewModel
+import java.time.ZoneId
 import javax.inject.Inject
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
+data class HomeUiState(
+    val recentRecords: List<PracticeHistoryItem> = emptyList(),
+    val isLoading: Boolean = true,
+    val historyError: String? = null
+)
+
 @HiltViewModel
-class HomeViewModel @Inject constructor(private val repository: PracticeRepository) : ViewModel() {
-    private val _history = MutableStateFlow(emptyList<com.naamjap.app.domain.repository.PracticeHistoryItem>())
-    val history = _history.asStateFlow()
+class HomeViewModel @Inject constructor(
+    private val repository: PracticeRepository
+) : ViewModel() {
+    private val _state = MutableStateFlow(HomeUiState())
+    val state = _state.asStateFlow()
     val data = repository.state
-    init { viewModelScope.launch { runCatching { repository.refresh(java.time.ZoneId.systemDefault().id) }; runCatching { _history.value = repository.loadHistoryPage(0, 5) } } }
+
+    init { refresh() }
+
+    fun refresh() {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(isLoading = true, historyError = null)
+            try {
+                repository.refresh(ZoneId.systemDefault().id)
+                _state.value = HomeUiState(recentRecords = repository.loadHistoryPage(0, 5), isLoading = false)
+            } catch (cancelled: CancellationException) {
+                _state.value = _state.value.copy(isLoading = false)
+                throw cancelled
+            } catch (_: Exception) {
+                _state.value = _state.value.copy(
+                    isLoading = false,
+                    historyError = repository.state.value.error ?: "Recent activity couldn't be loaded. Try again."
+                )
+            }
+        }
+    }
 }
 
 @Composable
 fun HomeScreen(onNavigate: (String) -> Unit, viewModel: HomeViewModel = hiltViewModel()) {
     val data by viewModel.data.collectAsStateWithLifecycle()
-    val recent by viewModel.history.collectAsStateWithLifecycle()
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = JapSpacing.lg, vertical = JapSpacing.md),
+        verticalArrangement = Arrangement.spacedBy(JapSpacing.md)
+    ) {
         Text("A quieter moment", style = MaterialTheme.typography.headlineMedium)
         Text("Take a breath. Begin with one name.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        GlassSurface(Modifier.fillMaxWidth()) { Column(Modifier.padding(20.dp)) {
-            DailyCountDisplay(data.dashboard.todayCount.toString(), "Today's Naam Jap")
-            Spacer(Modifier.height(12.dp))
-            val goal = data.dashboard.dailyGoal.coerceAtLeast(1)
-            val progress = (data.dashboard.todayCount.toDouble() / goal).coerceIn(0.0, 1.0)
-            GoalProgressCard("${data.dashboard.dailyGoal} repetitions", (progress * 100).toInt(), "${(goal-data.dashboard.todayCount).coerceAtLeast(0)} remaining", progress.toFloat())
-        } }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            StatCard("Current streak", "${data.dashboard.currentStreak} days", Modifier.weight(1f))
-            StatCard("Lifetime count", data.dashboard.lifetimeCount.toString(), Modifier.weight(1f))
+
+        if (!data.hasLoaded && data.isLoading) {
+            CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
+        } else if (!data.hasLoaded) {
+            PremiumCard(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(JapSpacing.md), verticalArrangement = Arrangement.spacedBy(JapSpacing.xs)) {
+                    Text(data.error ?: "Your practice data isn't available yet.", color = MaterialTheme.colorScheme.error)
+                    TextButton(onClick = viewModel::refresh) { Text("Retry") }
+                }
+            }
+        } else {
+            GlassSurface(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(JapSpacing.md)) {
+                    DailyCountDisplay(data.dashboard.todayCount.toString(), "Today's Naam Jap")
+                    Spacer(Modifier.height(JapSpacing.sm))
+                    val goal = data.dashboard.dailyGoal.coerceAtLeast(1)
+                    val progress = (data.dashboard.todayCount.toDouble() / goal).coerceIn(0.0, 1.0)
+                    GoalProgressCard(
+                        "${data.dashboard.dailyGoal} repetitions",
+                        (progress * 100).toInt(),
+                        "${(goal - data.dashboard.todayCount).coerceAtLeast(0)} remaining",
+                        progress.toFloat()
+                    )
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(JapSpacing.xs)) {
+                StatCard("Current streak", "${data.dashboard.currentStreak} days", Modifier.weight(1f))
+                StatCard("Lifetime count", data.dashboard.lifetimeCount.toString(), Modifier.weight(1f))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(JapSpacing.xs)) {
+                StatCard("Sessions today", data.dashboard.sessionsToday.toString(), Modifier.weight(1f))
+                StatCard("Naam types", data.naamTypes.size.toString(), Modifier.weight(1f))
+            }
+
+            SectionHeader("Recent activity", action = "View all", onAction = { onNavigate("history") })
+            when {
+                state.isLoading && state.recentRecords.isEmpty() -> CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
+                state.historyError != null -> PremiumCard(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(JapSpacing.md)) {
+                        Text(state.historyError.orEmpty(), color = MaterialTheme.colorScheme.error)
+                        TextButton(onClick = viewModel::refresh) { Text("Retry") }
+                    }
+                }
+                state.recentRecords.isEmpty() -> EmptyState("Your practice begins here", "Completed sessions and manual records appear here.")
+                else -> state.recentRecords.forEach {
+                    SessionRow(it.naamName, it.count.toString(), it.date.toString(), if (it.isSession) "Session" else "Manual")
+                }
+            }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            StatCard("Sessions today", data.dashboard.sessionsToday.toString(), Modifier.weight(1f))
-            StatCard("Naam types", data.naamTypes.size.toString(), Modifier.weight(1f))
-        }
-        SectionHeader("Recent activity", action = "View all", onAction = { onNavigate("history") })
-        if (recent.isEmpty()) EmptyState("Your practice begins here", "Completed sessions and manual records appear here.")
-        else recent.forEach { SessionRow(it.naamName, it.count.toString(), it.date.toString(), if (it.isSession) "Session" else "Manual") }
-        data.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
 }

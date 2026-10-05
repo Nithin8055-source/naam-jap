@@ -54,7 +54,13 @@ class JapViewModel @Inject constructor(private val repository: com.naamjap.app.d
     init { viewModelScope.launch { runCatching { repository.refresh(java.time.ZoneId.systemDefault().id) }; if (repository.state.value.naamTypes.isEmpty()) runCatching { repository.ensureDefaultNaamType() } } }
     fun start(id: String) = viewModelScope.launch { runCatching { repository.startSession(id) } }
     fun action(id: String, action: com.naamjap.app.domain.repository.SessionAction) = viewModelScope.launch { runCatching { repository.applySessionAction(id, action) } }
-    suspend fun save(id: String, count: Long, note: String?, naamId: String, date: LocalDate) { repository.saveManualRecord(com.naamjap.app.domain.model.PracticeRecord(id, count, System.currentTimeMillis(), note), naamId, date); repository.refresh(java.time.ZoneId.systemDefault().id) }
+    suspend fun save(id: String, count: Long, note: String?, naamId: String, date: LocalDate) {
+        repository.saveManualRecord(
+            com.naamjap.app.domain.model.PracticeRecord(id, count, System.currentTimeMillis(), note),
+            naamId,
+            date
+        )
+    }
 }
 
 @Composable
@@ -166,7 +172,15 @@ fun ManualRecordScreen(onBack: () -> Unit) {
                     val naamId = mantraId.ifBlank { data.naamTypes.firstOrNull { it.isDefault }?.id.orEmpty() }
                     if (amount == null || amount < 1) snackbarHostState.showSnackbar("Enter a count greater than zero.")
                     else if (naamId.isBlank()) snackbarHostState.showSnackbar("Choose a naam first.")
-                    else runCatching { viewModel.save(pendingRecordId, amount, note, naamId, LocalDate.parse(selectedDate)) }.onSuccess { snackbarHostState.showSnackbar("Record saved to your account."); onBack() }.onFailure { snackbarHostState.showSnackbar("Record could not be confirmed. Retry safely or check your connection.") }
+                    else try {
+                        viewModel.save(pendingRecordId, amount, note, naamId, LocalDate.parse(selectedDate))
+                        snackbarHostState.showSnackbar("Record saved to your account.")
+                        onBack()
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        snackbarHostState.showSnackbar(data.error ?: "Record could not be confirmed. Retry the save safely.")
+                    }
                 }
             })
         }

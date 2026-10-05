@@ -3,6 +3,7 @@ package com.naamjap.app.ui.components
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -19,11 +20,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.blur
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -35,20 +32,51 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import com.naamjap.app.navigation.Destination
 import com.naamjap.app.R
 import com.naamjap.app.ui.theme.JapSpacing
-import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.hazeEffect
 
 @Composable
-fun PremiumScaffold(bottomBar: @Composable () -> Unit, content: @Composable (PaddingValues) -> Unit) {
-    Scaffold(containerColor = MaterialTheme.colorScheme.background) { innerPadding ->
-        Box(Modifier.fillMaxSize()) {
-            content(innerPadding)
-            Box(Modifier.align(Alignment.BottomCenter)) {
-                bottomBar()
-            }
+fun PremiumScaffold(
+    bottomBar: @Composable () -> Unit,
+    feedbackMessage: String? = null,
+    onFeedbackRetry: (() -> Unit)? = null,
+    content: @Composable (PaddingValues) -> Unit
+) {
+    val snackbarHostState = remember { SnackbarHostState() }
+    val currentRetry = rememberUpdatedState(onFeedbackRetry)
+    LaunchedEffect(feedbackMessage) {
+        val message = feedbackMessage ?: return@LaunchedEffect
+        val result = snackbarHostState.showSnackbar(
+            message = message,
+            actionLabel = if (currentRetry.value != null) "Retry" else null
+        )
+        if (result == SnackbarResult.ActionPerformed) currentRetry.value?.invoke()
+    }
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = { NaamJapTopAppBar() },
+        bottomBar = bottomBar,
+        snackbarHost = { SnackbarHost(snackbarHostState) }
+    ) { innerPadding -> content(innerPadding) }
+}
+
+@Composable
+private fun NaamJapTopAppBar() {
+    Surface(color = MaterialTheme.colorScheme.background) {
+        Row(
+            Modifier.fillMaxWidth().statusBarsPadding().height(56.dp).padding(horizontal = JapSpacing.lg),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(JapSpacing.sm)
+        ) {
+            NaamJapLogo(Modifier.size(38.dp), contentDescription = "Naam Jap logo")
+            Text("Naam Jap", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
         }
     }
 }
@@ -70,7 +98,7 @@ fun LotusOutlineMark(modifier: Modifier = Modifier, contentDescription: String? 
 
 @Composable
 fun NaamJapLogo(modifier: Modifier = Modifier, contentDescription: String? = "Naam Jap") {
-    Image(painterResource(R.drawable.ic_naam_jap_logo), contentDescription, modifier, contentScale = ContentScale.Fit)
+    Image(painterResource(R.drawable.logo), contentDescription, modifier, contentScale = ContentScale.Fit)
 }
 
 @Composable
@@ -229,43 +257,31 @@ fun ThemePreview(label: String, selected: Boolean, onClick: () -> Unit, icon: @C
 }
 
 @Composable
-fun GlassBottomBar(selectedRoute: String?, onSelect: (Destination) -> Unit, modifier: Modifier = Modifier, hazeState: HazeState? = null) {
+fun GlassBottomBar(selectedRoute: String?, onSelect: (Destination) -> Unit, modifier: Modifier = Modifier) {
     val haptics = LocalHapticFeedback.current
-    Box(modifier.fillMaxWidth()) {
-        Box(
-            Modifier.align(Alignment.Center).fillMaxWidth(.94f).height(70.dp)
-                .clip(CircleShape)
-                .background(Brush.horizontalGradient(listOf(MaterialTheme.colorScheme.primary.copy(alpha = .20f), MaterialTheme.colorScheme.secondary.copy(alpha = .16f), MaterialTheme.colorScheme.primary.copy(alpha = .18f))))
-                .blur(18.dp)
-        )
-        Surface(
-            modifier = Modifier.fillMaxWidth().clip(CircleShape).hazeEffect(state = hazeState) {
-                backgroundColor = Color.Transparent
-                blurRadius = 22.dp
-                noiseFactor = 0f
-            },
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.surface.copy(alpha = .62f),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = .32f)),
-            shadowElevation = 12.dp,
-            tonalElevation = 0.dp
-        ) {
-            BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 5.dp, vertical = 6.dp)) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(26.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = .96f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .72f)),
+        shadowElevation = 4.dp,
+        tonalElevation = 0.dp
+    ) {
+            BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp)) {
                 val itemWidth = maxWidth / Destination.primary.size
                 val selectedIndex = Destination.primary.indexOfFirst { it.route == selectedRoute }.coerceAtLeast(0)
                 val indicatorX by animateDpAsState(itemWidth * selectedIndex.toFloat(), label = "nav indicator position")
-                Box(Modifier.align(Alignment.CenterStart).offset(x = indicatorX).width(itemWidth).height(46.dp).padding(horizontal = 2.dp).clip(CircleShape).background(Brush.horizontalGradient(listOf(MaterialTheme.colorScheme.primary.copy(alpha = .20f), MaterialTheme.colorScheme.secondary.copy(alpha = .16f), MaterialTheme.colorScheme.primary.copy(alpha = .20f)))))
+                Box(Modifier.align(Alignment.CenterStart).offset(x = indicatorX).width(itemWidth).height(52.dp).padding(horizontal = 2.dp).clip(RoundedCornerShape(18.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = .11f)))
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Destination.primary.forEach { destination ->
                         val selected = selectedRoute == destination.route
                         val tint by animateColorAsState(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, label = "nav icon tint")
-                        val scale by animateFloatAsState(if (selected) 1.06f else 1f, label = "nav icon scale")
                         Column(
-                            Modifier.weight(1f).clip(CircleShape).clickable(role = Role.Tab, onClickLabel = "Open ${destination.label}") { if (!selected) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove); onSelect(destination) }.semantics { this.selected = selected }.padding(horizontal = 2.dp, vertical = 5.dp),
+                            Modifier.weight(1f).heightIn(min = 52.dp).clip(RoundedCornerShape(18.dp)).clickable(role = Role.Tab, onClickLabel = "Open ${destination.label}") { if (!selected) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove); onSelect(destination) }.semantics { this.selected = selected }.padding(horizontal = 2.dp, vertical = 3.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(3.dp)
+                            verticalArrangement = Arrangement.Center
                         ) {
-                            Box(Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 30.dp).scale(scale).padding(horizontal = 12.dp, vertical = 4.dp), contentAlignment = Alignment.Center) {
+                            Box(Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 28.dp), contentAlignment = Alignment.Center) {
                                 Icon(destination.icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
                             }
                             Text(destination.label, color = tint, style = MaterialTheme.typography.labelSmall, maxLines = 1)
@@ -273,7 +289,6 @@ fun GlassBottomBar(selectedRoute: String?, onSelect: (Destination) -> Unit, modi
                     }
                 }
             }
-        }
     }
 }
 

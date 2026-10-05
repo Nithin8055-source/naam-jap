@@ -56,7 +56,7 @@ Replace the remote URL with the HTTPS URL of an empty GitHub repository. If a re
 - `ui/theme`: centralized light/dark colors, typography, shapes, and spacing tokens
 - `ui/components`: reusable glass navigation, surfaces, cards, actions, goal progress, inputs, and empty states
 
-The Jap counter, manual records, home dashboard, history, profile editing, naam types, daily goal, sign out, and account deletion use authenticated Supabase operations. Session event receipts support retry-safe count actions and derive pause-aware elapsed time without adding columns to `jap_sessions`. Insights still uses illustrative preview data; daily-goal rows have no effective date, so the verified schema supports one current goal per account rather than per-day goal history. Theme preference remains stored in DataStore.
+The Jap counter, manual records, home dashboard, history, profile editing, naam types, daily goal, sign out, and account deletion use authenticated Supabase operations. Session event receipts support retry-safe count actions and derive pause-aware elapsed time without adding columns to `jap_sessions`. Insights uses the user's saved records and dashboard totals; daily-goal rows have no effective date, so the verified schema supports one current goal per account rather than per-day goal history. Theme preference remains stored in DataStore.
 
 ## Next phases
 

@@ -35,6 +35,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.naamjap.app.domain.repository.PracticeHistoryItem
 import com.naamjap.app.domain.repository.PracticeRepository
+import com.naamjap.app.data.remote.NetworkStatus
+import com.naamjap.app.data.remote.safeSupabaseError
 import com.naamjap.app.ui.components.EmptyState
 import com.naamjap.app.ui.components.PremiumCard
 import com.naamjap.app.ui.components.StatCard
@@ -58,7 +60,8 @@ data class InsightsUiState(
 
 @HiltViewModel
 class InsightsViewModel @Inject constructor(
-    private val repository: PracticeRepository
+    private val repository: PracticeRepository,
+    private val networkStatus: NetworkStatus
 ) : ViewModel() {
     private val _state = MutableStateFlow(InsightsUiState())
     val state = _state.asStateFlow()
@@ -81,10 +84,10 @@ class InsightsViewModel @Inject constructor(
             } catch (cancelled: CancellationException) {
                 _state.value = _state.value.copy(isLoading = false)
                 throw cancelled
-            } catch (_: Exception) {
+            } catch (error: Exception) {
                 _state.value = _state.value.copy(
                     isLoading = false,
-                    error = "Practice insights couldn't be loaded. Check your connection and try again."
+                    error = safeSupabaseError(error, networkStatus.hasValidatedInternet())
                 )
             }
         }

@@ -29,12 +29,18 @@ import com.naamjap.app.ui.theme.JapSpacing
 import com.naamjap.app.ui.theme.ThemeChoice
 import com.naamjap.app.ui.theme.NaamJapTheme
 import com.naamjap.app.domain.model.AccountIdentity
+import com.naamjap.app.data.remote.NetworkStatus
+import com.naamjap.app.data.remote.safeSupabaseError
 import androidx.compose.ui.tooling.preview.Preview
 
-data class SettingsUiState(val displayName: String = "Personal practice", val subtitle: String = "Your private space", val message: String? = null, val error: String? = null, val dailyGoal: Long = 1000)
+data class SettingsUiState(val displayName: String = "", val subtitle: String = "", val message: String? = null, val error: String? = null, val dailyGoal: Long = 1000)
 
 @HiltViewModel
-class SettingsViewModel @Inject constructor(private val profiles: com.naamjap.app.domain.repository.ProfileRepository, private val practice: com.naamjap.app.domain.repository.PracticeRepository) : ViewModel() {
+class SettingsViewModel @Inject constructor(
+    private val profiles: com.naamjap.app.domain.repository.ProfileRepository,
+    private val practice: com.naamjap.app.domain.repository.PracticeRepository,
+    private val networkStatus: NetworkStatus
+) : ViewModel() {
     val data = practice.state
     private val _state = MutableStateFlow(SettingsUiState())
     val state: StateFlow<SettingsUiState> = _state
@@ -70,13 +76,11 @@ class SettingsViewModel @Inject constructor(private val profiles: com.naamjap.ap
 
     fun addNaam(name: String) = runAction("Naam could not be added.") {
         practice.createNaamType(name)
-        practice.refresh(java.time.ZoneId.systemDefault().id)
         _state.value = _state.value.copy(message = "Naam added.", error = null)
     }
 
     fun setDefaultNaam(id: String) = runAction("Default naam could not be changed.") {
         practice.setDefaultNaamType(id)
-        practice.refresh(java.time.ZoneId.systemDefault().id)
     }
 
     fun deleteAccount() = runAction("Account deletion could not be completed.") {
@@ -88,8 +92,13 @@ class SettingsViewModel @Inject constructor(private val profiles: com.naamjap.ap
             action()
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (_: Exception) {
-            _state.value = _state.value.copy(error = errorMessage, message = null)
+        } catch (error: Exception) {
+            val message = if (error is IllegalArgumentException) {
+                error.message ?: errorMessage
+            } else {
+                safeSupabaseError(error, networkStatus.hasValidatedInternet())
+            }
+            _state.value = _state.value.copy(error = message, message = null)
         }
     }
 }
@@ -125,8 +134,8 @@ fun SettingsScreen(
                     Box(contentAlignment = Alignment.Center) { LotusMark(Modifier.size(44.dp), "Naam Jap lotus logo") }
                 }
                 Column {
-                    Text(state.displayName.ifBlank { account?.displayName ?: "Naam Jap account" }, style = MaterialTheme.typography.titleMedium)
-                    Text(state.subtitle.ifBlank { account?.email.orEmpty() }, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    Text(state.displayName.ifBlank { account?.displayName?.takeIf(String::isNotBlank) ?: "Signed-in account" }, style = MaterialTheme.typography.titleMedium)
+                    Text(state.subtitle.ifBlank { account?.email ?: "Email unavailable" }, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -174,7 +183,7 @@ fun SettingsScreen(
 
         SettingsSection("Account & privacy") {
             if (account != null) {
-                SettingsRow(Icons.Default.Person, state.displayName.ifBlank { account.displayName ?: "Naam Jap account" }, state.subtitle.ifBlank { account.email ?: "Signed in" })
+                SettingsRow(Icons.Default.Person, state.displayName.ifBlank { account.displayName?.takeIf(String::isNotBlank) ?: "Signed-in account" }, state.subtitle.ifBlank { account.email ?: "Email unavailable" })
                 TextButton(onClick = { nameDraft = state.displayName; editName = true }, modifier = Modifier.fillMaxWidth()) { Text("Edit display name") }
                 TextButton(onClick = { confirmSignOut = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Sign out") }
                 TextButton(onClick = { confirmDelete = true }, modifier = Modifier.fillMaxWidth()) { Text("Delete account and cloud data", color = MaterialTheme.colorScheme.error) }

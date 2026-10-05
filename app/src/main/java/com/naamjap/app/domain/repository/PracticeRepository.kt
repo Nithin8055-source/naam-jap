@@ -42,6 +42,7 @@ data class PracticeDataState(
     val isSaving: Boolean = false,
     val hasLoaded: Boolean = false,
     val error: String? = null,
+    val canRetry: Boolean = false,
     val message: String? = null,
     val naamTypes: List<NaamType> = emptyList(),
     val activeSession: ActiveJapSession? = null,

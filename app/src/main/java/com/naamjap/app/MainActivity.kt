@@ -3,7 +3,6 @@ package com.naamjap.app
 import android.os.Bundle
 import android.os.Build
 import android.os.SystemClock
-import android.graphics.Color as AndroidColor
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.ComponentActivity
@@ -66,8 +65,6 @@ class MainActivity : ComponentActivity() {
             }
             SideEffect {
                 if (themeState.isLoaded) themePreferenceLoaded.set(true)
-                window.statusBarColor = AndroidColor.TRANSPARENT
-                window.navigationBarColor = AndroidColor.TRANSPARENT
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     window.isStatusBarContrastEnforced = false
                     window.isNavigationBarContrastEnforced = false

@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -20,8 +21,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.hazeSource
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -37,6 +36,35 @@ import com.naamjap.app.ui.components.GlassBottomBar
 import com.naamjap.app.ui.components.PremiumScaffold
 import com.naamjap.app.ui.theme.ThemeChoice
 import com.naamjap.app.domain.model.AccountIdentity
+import com.naamjap.app.domain.repository.PracticeRepository
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewModelScope
+import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+import java.time.ZoneId
+
+@HiltViewModel
+class PracticeFeedbackViewModel @Inject constructor(
+    private val repository: PracticeRepository
+) : ViewModel() {
+    val state = repository.state
+
+    fun retry() {
+        viewModelScope.launch {
+            try {
+                repository.refresh(ZoneId.systemDefault().id)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // The repository stores a safe, user-facing error in its state.
+            }
+        }
+    }
+}
 
 @Composable
 fun NaamJapApp(
@@ -46,7 +74,8 @@ fun NaamJapApp(
     onSignOut: () -> Unit
 ) {
     val navController = rememberNavController()
-    val hazeState = remember { HazeState() }
+    val feedbackViewModel: PracticeFeedbackViewModel = hiltViewModel()
+    val practiceState by feedbackViewModel.state.collectAsStateWithLifecycle()
     val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
     val density = LocalDensity.current
     val swipeThreshold = with(density) { 64.dp.toPx() }
@@ -61,13 +90,17 @@ fun NaamJapApp(
         }
     }
 
-    PremiumScaffold(bottomBar = {
-        if (currentRoute != Destination.ManualRecord.route) Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
-        GlassBottomBar(selectedRoute = currentRoute, hazeState = hazeState, onSelect = { destination ->
-            navigateToPrimary(destination)
-        })
+    PremiumScaffold(
+        feedbackMessage = practiceState.error,
+        onFeedbackRetry = if (practiceState.canRetry) feedbackViewModel::retry else null,
+        bottomBar = {
+            if (currentRoute != Destination.ManualRecord.route) {
+                Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    GlassBottomBar(selectedRoute = currentRoute, onSelect = ::navigateToPrimary)
+                }
+            }
         }
-    }) { innerPadding ->
+    ) { innerPadding ->
         var horizontalDrag by remember(currentRoute) { mutableFloatStateOf(0f) }
         NavHost(
             navController = navController,
@@ -78,7 +111,7 @@ fun NaamJapApp(
             popExitTransition = { slideOutHorizontally(animationSpec = tween(380, easing = FastOutSlowInEasing)) { width -> width / 6 } + fadeOut(tween(220)) },
             modifier = Modifier
                 .padding(innerPadding)
-                .hazeSource(hazeState)
+                .imePadding()
                 .pointerInput(currentRoute, isPrimaryRoute) {
                     if (isPrimaryRoute) {
                         detectHorizontalDragGestures(

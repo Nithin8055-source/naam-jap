@@ -60,7 +60,6 @@ class HistoryViewModel @Inject constructor(
             _state.value = HistoryUiState(error = safeSupabaseError(error, networkStatus.hasValidatedInternet()))
         }
     } } }
-}
 
 @Preview(showBackground = true)
 @Composable

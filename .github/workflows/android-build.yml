@@ -36,7 +36,29 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build and test
-        run: ./gradlew assembleDebug testDebugUnitTest lintDebug --info --stacktrace
+        shell: bash
+        run: |
+          java -version
+          ./gradlew --version
+
+          set +e
+          ./gradlew :app:kspDebugKotlin --stacktrace --info 2>&1 | tee ksp-debug.log
+          ksp_exit=${PIPESTATUS[0]}
+          set -e
+
+          if [[ "$ksp_exit" -ne 0 ]]; then
+            if grep -Fq "Compilation error. See log for more details" ksp-debug.log \
+              && ! grep -Eiq '(^|[[:space:]])e:|error:|Unresolved reference|Cannot access|Type mismatch|NonExistentClass' ksp-debug.log; then
+              echo "KSP emitted only its generic compilation failure; running Kotlin compilation for additional diagnostics."
+              set +e
+              ./gradlew :app:compileDebugKotlin --stacktrace --info 2>&1 | tee compile-debug.log
+              compile_exit=${PIPESTATUS[0]}
+              set -e
+            fi
+            exit "$ksp_exit"
+          fi
+
+          ./gradlew assembleDebug testDebugUnitTest lintDebug --info --stacktrace
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}

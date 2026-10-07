@@ -11,11 +11,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SelfImprovement
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -93,8 +96,24 @@ fun HomeScreen(onNavigate: (String) -> Unit, displayName: String? = null, viewMo
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = JapSpacing.lg, vertical = JapSpacing.md),
         verticalArrangement = Arrangement.spacedBy(JapSpacing.md)
     ) {
-        Text("Good morning", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(displayName?.takeIf(String::isNotBlank) ?: "Welcome back", style = MaterialTheme.typography.headlineMedium)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val name = displayName?.takeIf(String::isNotBlank) ?: "there"
+            Text(
+                text = "Hi, $name",
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.headlineMedium
+            )
+            IconButton(onClick = { onNavigate("settings") }) {
+                Icon(
+                    imageVector = Icons.Outlined.Settings,
+                    contentDescription = "Open settings",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
         Text("Take a breath. Begin with one name.", color = MaterialTheme.colorScheme.onSurfaceVariant)
 
         if (!data.hasLoaded && data.isLoading) {

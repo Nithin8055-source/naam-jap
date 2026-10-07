@@ -24,6 +24,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naamjap.app.domain.repository.PracticeHistoryItem
@@ -60,11 +62,11 @@ class HomeViewModel @Inject constructor(
     private val _state = MutableStateFlow(HomeUiState())
     val state = _state.asStateFlow()
     val data = repository.state
-
-    init { refresh() }
+    private var refreshJob: kotlinx.coroutines.Job? = null
 
     fun refresh() {
-        viewModelScope.launch {
+        if (refreshJob?.isActive == true) return
+        refreshJob = viewModelScope.launch {
             _state.value = _state.value.copy(isLoading = true, historyError = null)
             try {
                 repository.refresh(ZoneId.systemDefault().id)
@@ -86,6 +88,7 @@ class HomeViewModel @Inject constructor(
 fun HomeScreen(onNavigate: (String) -> Unit, displayName: String? = null, viewModel: HomeViewModel = hiltViewModel()) {
     val data by viewModel.data.collectAsStateWithLifecycle()
     val state by viewModel.state.collectAsStateWithLifecycle()
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refresh() }
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = JapSpacing.lg, vertical = JapSpacing.md),
         verticalArrangement = Arrangement.spacedBy(JapSpacing.md)

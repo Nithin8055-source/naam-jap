@@ -80,7 +80,9 @@ fun safeSupabaseError(error: Throwable, hasValidatedInternet: Boolean): String {
         "PGRST116" -> return "The requested database row was missing or ambiguous. Refresh and try again."
     }
     if (postgrestError != null && code in setOf("P0001", "P0002", "22023", "23503", "23505", "23514", "28000")) {
-        val message = postgrestError.message.toSafeDiagnosticMessage(code)
+        val message =
+            postgrestError.message?.toSafeDiagnosticMessage(code)
+                ?: "[server message withheld for privacy]"
         val details = postgrestError.details?.toSafeDiagnosticMessage(code)
         val hint = postgrestError.hint?.toSafeDiagnosticMessage(code)
         val diagnostic = listOfNotNull(

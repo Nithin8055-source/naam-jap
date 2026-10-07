@@ -4,6 +4,7 @@ import com.naamjap.app.data.remote.SupabaseProvider
 import com.naamjap.app.data.remote.NetworkStatus
 import com.naamjap.app.data.remote.DatabaseOperationException
 import com.naamjap.app.data.remote.logSafeSupabaseFailure
+import com.naamjap.app.data.remote.safeSupabaseError
 import com.naamjap.app.domain.model.PracticeRecord
 import com.naamjap.app.domain.repository.ActiveJapSession
 import com.naamjap.app.domain.repository.NaamType

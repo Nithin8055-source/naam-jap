@@ -64,10 +64,14 @@ class MainActivity : ComponentActivity() {
                 ThemeChoice.DARK -> true
             }
             SideEffect {
+                window.navigationBarColor = android.graphics.Color.TRANSPARENT
                 if (themeState.isLoaded) themePreferenceLoaded.set(true)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     window.isStatusBarContrastEnforced = false
                     window.isNavigationBarContrastEnforced = false
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    window.navigationBarDividerColor = android.graphics.Color.TRANSPARENT
                 }
                 WindowCompat.getInsetsController(window, window.decorView).apply {
                     isAppearanceLightStatusBars = !darkTheme

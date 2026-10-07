@@ -21,6 +21,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeSource
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -74,6 +76,7 @@ fun NaamJapApp(
     onSignOut: () -> Unit
 ) {
     val navController = rememberNavController()
+    val hazeState = remember { HazeState() }
     val feedbackViewModel: PracticeFeedbackViewModel = hiltViewModel()
     val practiceState by feedbackViewModel.state.collectAsStateWithLifecycle()
     val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
@@ -94,10 +97,8 @@ fun NaamJapApp(
         feedbackMessage = practiceState.error,
         onFeedbackRetry = if (practiceState.canRetry) feedbackViewModel::retry else null,
         bottomBar = {
-            if (currentRoute != Destination.ManualRecord.route) {
-                Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
-                    GlassBottomBar(selectedRoute = currentRoute, onSelect = ::navigateToPrimary)
-                }
+            Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                GlassBottomBar(selectedRoute = currentRoute?.takeIf { route -> Destination.primary.any { it.route == route } }, onSelect = ::navigateToPrimary, hazeState = hazeState)
             }
         }
     ) { innerPadding ->
@@ -111,6 +112,7 @@ fun NaamJapApp(
             popExitTransition = { slideOutHorizontally(animationSpec = tween(380, easing = FastOutSlowInEasing)) { width -> width / 6 } + fadeOut(tween(220)) },
             modifier = Modifier
                 .padding(innerPadding)
+                .hazeSource(hazeState)
                 .imePadding()
                 .pointerInput(currentRoute, isPrimaryRoute) {
                     if (isPrimaryRoute) {
@@ -129,7 +131,7 @@ fun NaamJapApp(
                     }
                 }
         ) {
-            composable(Destination.Home.route) { HomeScreen(onNavigate = { route ->
+            composable(Destination.Home.route) { HomeScreen(displayName = account.displayName, onNavigate = { route ->
                 if (route == Destination.ManualRecord.route) navController.navigate(route) { launchSingleTop = true }
                 else Destination.primary.firstOrNull { it.route == route }?.let(::navigateToPrimary)
             }) }

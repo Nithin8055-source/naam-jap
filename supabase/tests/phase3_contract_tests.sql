@@ -3,6 +3,22 @@
 -- back at the end; do not run concurrently with real app traffic.
 begin;
 
+do $$
+declare
+    v_delete_session regprocedure := to_regprocedure('public.delete_jap_session(uuid)');
+begin
+    if v_delete_session is null then
+        raise exception 'Expected public.delete_jap_session(uuid) RPC is missing';
+    end if;
+    if not has_function_privilege('authenticated', v_delete_session, 'EXECUTE') then
+        raise exception 'authenticated must be able to execute delete_jap_session(uuid)';
+    end if;
+    if has_function_privilege('anon', v_delete_session, 'EXECUTE') then
+        raise exception 'anon/public must not be able to execute delete_jap_session(uuid)';
+    end if;
+end
+$$;
+
 create temporary table phase3_test_context (
     owner_id uuid not null,
     hidden_session_id uuid not null

@@ -61,6 +61,23 @@ class SupabaseAuthRepository @Inject constructor(
         client().auth.resetPasswordForEmail(email, redirectUrl = SupabaseProvider.AUTH_REDIRECT_URL)
     }
 
+    override suspend fun reauthenticate(password: String) {
+        require(password.isNotBlank()) { "Enter your current password." }
+        val auth = client().auth
+        val currentUser = requireNotNull(auth.currentUserOrNull()) { "Sign in again before confirming this change." }
+        val email = requireNotNull(currentUser.email?.takeIf(String::isNotBlank)) {
+            "Password confirmation is unavailable for this account."
+        }
+        auth.signInWith(Email) {
+            this.email = email
+            this.password = password
+        }
+        if (auth.currentUserOrNull()?.id != currentUser.id) {
+            auth.signOut()
+            error("Password confirmation did not match the signed-in account.")
+        }
+    }
+
     override suspend fun updatePassword(password: String) {
         client().auth.updateUser { this.password = password }
     }

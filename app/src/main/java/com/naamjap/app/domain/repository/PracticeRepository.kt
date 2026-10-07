@@ -4,6 +4,7 @@ import com.naamjap.app.domain.model.PracticeRecord
 import java.time.Instant
 import java.time.LocalDate
 import kotlinx.coroutines.flow.StateFlow
+import java.util.UUID
 
 data class NaamType(val id: String, val name: String, val isDefault: Boolean)
 
@@ -59,7 +60,13 @@ interface PracticeRepository {
     suspend fun createNaamType(name: String): NaamType
     suspend fun setDefaultNaamType(id: String): NaamType
     suspend fun startSession(naamId: String): ActiveJapSession
-    suspend fun applySessionAction(sessionId: String, action: SessionAction): ActiveJapSession
+    suspend fun applySessionAction(
+        sessionId: String,
+        action: SessionAction,
+        operationId: String = UUID.randomUUID().toString()
+    ): ActiveJapSession
+    suspend fun deleteSession(sessionId: String)
+    suspend fun deleteManualRecord(recordId: String)
     suspend fun saveManualRecord(record: PracticeRecord, naamId: String, date: LocalDate)
     suspend fun saveDailyGoal(targetCount: Long)
     fun clearForSignedOutUser()

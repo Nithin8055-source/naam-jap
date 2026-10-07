@@ -41,6 +41,11 @@ import androidx.compose.material3.SnackbarHostState
 import com.naamjap.app.navigation.Destination
 import com.naamjap.app.R
 import com.naamjap.app.ui.theme.JapSpacing
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeEffect
+import java.text.NumberFormat
+
+fun formatCount(count: Long): String = NumberFormat.getIntegerInstance().format(count)
 
 @Composable
 fun PremiumScaffold(
@@ -257,21 +262,32 @@ fun ThemePreview(label: String, selected: Boolean, onClick: () -> Unit, icon: @C
 }
 
 @Composable
-fun GlassBottomBar(selectedRoute: String?, onSelect: (Destination) -> Unit, modifier: Modifier = Modifier) {
+fun GlassBottomBar(selectedRoute: String?, onSelect: (Destination) -> Unit, modifier: Modifier = Modifier, hazeState: HazeState? = null) {
     val haptics = LocalHapticFeedback.current
+    val surfaceColor = MaterialTheme.colorScheme.surface
+    val borderColor = MaterialTheme.colorScheme.secondary
+    val shape = RoundedCornerShape(26.dp)
     Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(26.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = .96f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .72f)),
-        shadowElevation = 4.dp,
+        modifier = modifier.fillMaxWidth().then(
+            if (hazeState != null) Modifier.hazeEffect(state = hazeState) {
+                blurRadius = 18.dp
+                backgroundColor = surfaceColor.copy(alpha = .72f)
+                alpha = 1f
+            } else Modifier
+        ),
+        shape = shape,
+        color = surfaceColor.copy(alpha = .78f),
+        border = BorderStroke(1.dp, borderColor.copy(alpha = .22f)),
+        shadowElevation = 8.dp,
         tonalElevation = 0.dp
     ) {
             BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp)) {
                 val itemWidth = maxWidth / Destination.primary.size
-                val selectedIndex = Destination.primary.indexOfFirst { it.route == selectedRoute }.coerceAtLeast(0)
-                val indicatorX by animateDpAsState(itemWidth * selectedIndex.toFloat(), label = "nav indicator position")
-                Box(Modifier.align(Alignment.CenterStart).offset(x = indicatorX).width(itemWidth).height(52.dp).padding(horizontal = 2.dp).clip(RoundedCornerShape(18.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = .11f)))
+                val selectedIndex = Destination.primary.indexOfFirst { it.route == selectedRoute }
+                val indicatorX by animateDpAsState(itemWidth * selectedIndex.coerceAtLeast(0).toFloat(), label = "nav indicator position")
+                if (selectedIndex >= 0) {
+                    Box(Modifier.align(Alignment.CenterStart).offset(x = indicatorX).width(itemWidth).height(52.dp).padding(horizontal = 2.dp).clip(RoundedCornerShape(18.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = .11f)))
+                }
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Destination.primary.forEach { destination ->
                         val selected = selectedRoute == destination.route

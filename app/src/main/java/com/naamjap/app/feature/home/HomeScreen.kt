@@ -14,6 +14,9 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.outlined.SelfImprovement
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -30,9 +33,11 @@ import com.naamjap.app.ui.components.EmptyState
 import com.naamjap.app.ui.components.GlassSurface
 import com.naamjap.app.ui.components.GoalProgressCard
 import com.naamjap.app.ui.components.PremiumCard
+import com.naamjap.app.ui.components.QuickActionItem
 import com.naamjap.app.ui.components.SectionHeader
 import com.naamjap.app.ui.components.SessionRow
 import com.naamjap.app.ui.components.StatCard
+import com.naamjap.app.ui.components.formatCount
 import com.naamjap.app.ui.theme.JapSpacing
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.time.ZoneId
@@ -78,14 +83,15 @@ class HomeViewModel @Inject constructor(
 }
 
 @Composable
-fun HomeScreen(onNavigate: (String) -> Unit, viewModel: HomeViewModel = hiltViewModel()) {
+fun HomeScreen(onNavigate: (String) -> Unit, displayName: String? = null, viewModel: HomeViewModel = hiltViewModel()) {
     val data by viewModel.data.collectAsStateWithLifecycle()
     val state by viewModel.state.collectAsStateWithLifecycle()
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = JapSpacing.lg, vertical = JapSpacing.md),
         verticalArrangement = Arrangement.spacedBy(JapSpacing.md)
     ) {
-        Text("A quieter moment", style = MaterialTheme.typography.headlineMedium)
+        Text("Good morning", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(displayName?.takeIf(String::isNotBlank) ?: "Welcome back", style = MaterialTheme.typography.headlineMedium)
         Text("Take a breath. Begin with one name.", color = MaterialTheme.colorScheme.onSurfaceVariant)
 
         if (!data.hasLoaded && data.isLoading) {
@@ -100,7 +106,7 @@ fun HomeScreen(onNavigate: (String) -> Unit, viewModel: HomeViewModel = hiltView
         } else {
             GlassSurface(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(JapSpacing.md)) {
-                    DailyCountDisplay(data.dashboard.todayCount.toString(), "Today's Naam Jap")
+                    DailyCountDisplay(formatCount(data.dashboard.todayCount), "Today's Naam Jap")
                     Spacer(Modifier.height(JapSpacing.sm))
                     val goal = data.dashboard.dailyGoal.coerceAtLeast(1)
                     val progress = (data.dashboard.todayCount.toDouble() / goal).coerceIn(0.0, 1.0)
@@ -114,11 +120,29 @@ fun HomeScreen(onNavigate: (String) -> Unit, viewModel: HomeViewModel = hiltView
             }
             Row(horizontalArrangement = Arrangement.spacedBy(JapSpacing.xs)) {
                 StatCard("Current streak", "${data.dashboard.currentStreak} days", Modifier.weight(1f))
-                StatCard("Lifetime count", data.dashboard.lifetimeCount.toString(), Modifier.weight(1f))
+                StatCard("Lifetime count", formatCount(data.dashboard.lifetimeCount), Modifier.weight(1f))
             }
             Row(horizontalArrangement = Arrangement.spacedBy(JapSpacing.xs)) {
                 StatCard("Sessions today", data.dashboard.sessionsToday.toString(), Modifier.weight(1f))
                 StatCard("Naam types", data.naamTypes.size.toString(), Modifier.weight(1f))
+            }
+
+            SectionHeader("Quick actions")
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(JapSpacing.sm)) {
+                QuickActionItem(
+                    label = "Start Jap",
+                    description = "Begin a live session",
+                    onClick = { onNavigate("jap") },
+                    icon = { androidx.compose.material3.Icon(Icons.Outlined.SelfImprovement, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                    modifier = Modifier.weight(1f)
+                )
+                QuickActionItem(
+                    label = "Add record",
+                    description = "Enter a daily count",
+                    onClick = { onNavigate("manual-record") },
+                    icon = { androidx.compose.material3.Icon(Icons.Default.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                    modifier = Modifier.weight(1f)
+                )
             }
 
             SectionHeader("Recent activity", action = "View all", onAction = { onNavigate("history") })
@@ -132,7 +156,7 @@ fun HomeScreen(onNavigate: (String) -> Unit, viewModel: HomeViewModel = hiltView
                 }
                 state.recentRecords.isEmpty() -> EmptyState("Your practice begins here", "Completed sessions and manual records appear here.")
                 else -> state.recentRecords.forEach {
-                    SessionRow(it.naamName, it.count.toString(), it.date.toString(), if (it.isSession) "Session" else "Manual")
+                    SessionRow(it.naamName, formatCount(it.count), it.date.toString(), if (it.isSession) "Session" else "Manual")
                 }
             }
         }

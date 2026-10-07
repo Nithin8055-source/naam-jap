@@ -9,12 +9,17 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -33,12 +38,21 @@ import com.naamjap.app.data.remote.NetworkStatus
 import com.naamjap.app.data.remote.safeSupabaseError
 import androidx.compose.ui.tooling.preview.Preview
 
-data class SettingsUiState(val displayName: String = "", val subtitle: String = "", val message: String? = null, val error: String? = null, val dailyGoal: Long = 1000)
+data class SettingsUiState(
+    val displayName: String = "",
+    val subtitle: String = "",
+    val message: String? = null,
+    val error: String? = null,
+    val dailyGoal: Long = 1000,
+    val isPasswordUpdating: Boolean = false,
+    val passwordUpdated: Boolean = false
+)
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val profiles: com.naamjap.app.domain.repository.ProfileRepository,
     private val practice: com.naamjap.app.domain.repository.PracticeRepository,
+    private val auth: com.naamjap.app.domain.repository.AuthRepository,
     private val networkStatus: NetworkStatus
 ) : ViewModel() {
     val data = practice.state
@@ -83,6 +97,29 @@ class SettingsViewModel @Inject constructor(
         practice.setDefaultNaamType(id)
     }
 
+    fun changePassword(currentPassword: String, newPassword: String, confirmation: String) = viewModelScope.launch {
+        _state.value = _state.value.copy(isPasswordUpdating = true, passwordUpdated = false, error = null, message = null)
+        try {
+            require(newPassword.length >= 8) { "Use at least 8 characters for the new password." }
+            require(newPassword == confirmation) { "The new passwords do not match." }
+            require(currentPassword.isNotBlank()) { "Enter your current password." }
+            auth.reauthenticate(currentPassword)
+            auth.updatePassword(newPassword)
+            _state.value = _state.value.copy(isPasswordUpdating = false, passwordUpdated = true, message = "Password updated.", error = null)
+        } catch (cancelled: CancellationException) {
+            _state.value = _state.value.copy(isPasswordUpdating = false)
+            throw cancelled
+        } catch (error: Exception) {
+            val rawMessage = error.message.orEmpty().lowercase()
+            val message = when {
+                "invalid login credentials" in rawMessage || "invalid credentials" in rawMessage -> "Your current password is incorrect."
+                error is IllegalArgumentException -> error.message ?: "Password could not be changed."
+                else -> safeSupabaseError(error, networkStatus.hasValidatedInternet())
+            }
+            _state.value = _state.value.copy(isPasswordUpdating = false, error = message)
+        }
+    }
+
     fun deleteAccount() = runAction("Account deletion could not be completed.") {
         profiles.deleteCurrentAccount()
     }
@@ -121,10 +158,23 @@ fun SettingsScreen(
     val practice by viewModel.data.collectAsStateWithLifecycle()
     var confirmSignOut by rememberSaveable { mutableStateOf(false) }
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
+    var changePasswordOpen by rememberSaveable { mutableStateOf(false) }
+    var currentPassword by remember { mutableStateOf("") }
+    var newPassword by remember { mutableStateOf("") }
+    var confirmNewPassword by remember { mutableStateOf("") }
     var editName by rememberSaveable { mutableStateOf(false) }
     var nameDraft by rememberSaveable { mutableStateOf("") }
     var goalDraft by rememberSaveable { mutableStateOf("") }
     var naamDraft by rememberSaveable { mutableStateOf("") }
+    var themeMenuExpanded by remember { mutableStateOf(false) }
+    LaunchedEffect(state.passwordUpdated) {
+        if (state.passwordUpdated) {
+            changePasswordOpen = false
+            currentPassword = ""
+            newPassword = ""
+            confirmNewPassword = ""
+        }
+    }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = JapSpacing.lg, top = JapSpacing.md, end = JapSpacing.lg, bottom = 104.dp), verticalArrangement = Arrangement.spacedBy(JapSpacing.md)) {
         Text("Make it yours", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text("Settings", style = MaterialTheme.typography.headlineLarge)
@@ -141,10 +191,33 @@ fun SettingsScreen(
         }
 
         SettingsSection("Appearance") {
-            Row(horizontalArrangement = Arrangement.spacedBy(JapSpacing.xs)) {
-                ThemePreview("Light", themeChoice == ThemeChoice.LIGHT, { onThemeChoice(ThemeChoice.LIGHT) }, { Icon(Icons.Default.LightMode, contentDescription = null) }, Modifier.weight(1f))
-                ThemePreview("Dark", themeChoice == ThemeChoice.DARK, { onThemeChoice(ThemeChoice.DARK) }, { Icon(Icons.Default.DarkMode, contentDescription = null) }, Modifier.weight(1f))
-                ThemePreview("System", themeChoice == ThemeChoice.SYSTEM, { onThemeChoice(ThemeChoice.SYSTEM) }, { Icon(Icons.Default.Settings, contentDescription = null) }, Modifier.weight(1f))
+            Box {
+                val themeLabel = when (themeChoice) {
+                    ThemeChoice.LIGHT -> "Light"
+                    ThemeChoice.DARK -> "Dark"
+                    ThemeChoice.SYSTEM -> "System"
+                }
+                Surface(
+                    onClick = { themeMenuExpanded = true },
+                    color = MaterialTheme.colorScheme.surface,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp)
+                ) {
+                    Row(Modifier.padding(horizontal = JapSpacing.md, vertical = JapSpacing.sm), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.LightMode, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Text("Theme", Modifier.weight(1f).padding(start = JapSpacing.md), style = MaterialTheme.typography.bodyLarge)
+                        Text(themeLabel, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Icon(Icons.Default.ChevronRight, contentDescription = "Choose theme", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                DropdownMenu(expanded = themeMenuExpanded, onDismissRequest = { themeMenuExpanded = false }) {
+                    listOf(ThemeChoice.LIGHT to "Light", ThemeChoice.DARK to "Dark", ThemeChoice.SYSTEM to "System").forEach { (choice, label) ->
+                        DropdownMenuItem(
+                            text = { Text(label) },
+                            leadingIcon = { if (choice == themeChoice) Icon(Icons.Default.Check, contentDescription = "Selected") },
+                            onClick = { themeMenuExpanded = false; onThemeChoice(choice) }
+                        )
+                    }
+                }
             }
         }
 
@@ -185,6 +258,7 @@ fun SettingsScreen(
             if (account != null) {
                 SettingsRow(Icons.Default.Person, state.displayName.ifBlank { account.displayName?.takeIf(String::isNotBlank) ?: "Signed-in account" }, state.subtitle.ifBlank { account.email ?: "Email unavailable" })
                 TextButton(onClick = { nameDraft = state.displayName; editName = true }, modifier = Modifier.fillMaxWidth()) { Text("Edit display name") }
+                TextButton(onClick = { changePasswordOpen = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Change password") }
                 TextButton(onClick = { confirmSignOut = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Sign out") }
                 TextButton(onClick = { confirmDelete = true }, modifier = Modifier.fillMaxWidth()) { Text("Delete account and cloud data", color = MaterialTheme.colorScheme.error) }
             } else {
@@ -225,6 +299,39 @@ fun SettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { editName = false }) { Text("Cancel") }
+            }
+        )
+    }
+    if (changePasswordOpen) {
+        AlertDialog(
+            onDismissRequest = {
+                if (!state.isPasswordUpdating) {
+                    changePasswordOpen = false
+                    currentPassword = ""
+                    newPassword = ""
+                    confirmNewPassword = ""
+                }
+            },
+            title = { Text("Change password") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(JapSpacing.xs)) {
+                    OutlinedTextField(currentPassword, { currentPassword = it }, label = { Text("Current password") }, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), singleLine = true, enabled = !state.isPasswordUpdating)
+                    OutlinedTextField(newPassword, { newPassword = it }, label = { Text("New password") }, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), singleLine = true, enabled = !state.isPasswordUpdating)
+                    OutlinedTextField(confirmNewPassword, { confirmNewPassword = it }, label = { Text("Confirm new password") }, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), singleLine = true, enabled = !state.isPasswordUpdating)
+                    if (newPassword.isNotEmpty() && newPassword.length < 8) Text("Use at least 8 characters.", color = MaterialTheme.colorScheme.error)
+                    if (confirmNewPassword.isNotEmpty() && newPassword != confirmNewPassword) Text("The new passwords do not match.", color = MaterialTheme.colorScheme.error)
+                    state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    if (state.isPasswordUpdating) LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = currentPassword.isNotBlank() && newPassword.length >= 8 && newPassword == confirmNewPassword && !state.isPasswordUpdating,
+                    onClick = { viewModel.changePassword(currentPassword, newPassword, confirmNewPassword) }
+                ) { Text("Update password") }
+            },
+            dismissButton = {
+                TextButton(enabled = !state.isPasswordUpdating, onClick = { changePasswordOpen = false; currentPassword = ""; newPassword = ""; confirmNewPassword = "" }) { Text("Cancel") }
             }
         )
     }

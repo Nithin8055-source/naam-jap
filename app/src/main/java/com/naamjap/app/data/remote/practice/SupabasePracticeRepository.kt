@@ -32,6 +32,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -55,7 +56,6 @@ class SupabasePracticeRepository @Inject constructor(
     private val actionMutex = Mutex()
     private var activeUserId: String? = null
     private var pendingStart: PendingStart? = null
-    private var pendingAction: PendingAction? = null
 
     init {
         provider.client?.auth?.sessionStatus?.onEach { session ->
@@ -74,11 +74,13 @@ class SupabasePracticeRepository @Inject constructor(
     }
 
     override suspend fun refresh(timeZoneId: String) = loadMutex.withLock {
-        _state.value = _state.value.copy(isLoading = true, error = null, canRetry = false, message = null)
-        try {
+        var transientAttempt = 0
+        while (true) {
+          _state.value = _state.value.copy(isLoading = true, error = null, canRetry = false, message = null)
+          try {
             val userId = currentUserId()
             resetForAccountIfNeeded(userId)
-            val zoneId = ZoneId.of(timeZoneId)
+        ZoneId.of(timeZoneId)
             val client = client()
             kotlinx.coroutines.coroutineScope {
             val names = async {
@@ -120,16 +122,23 @@ class SupabasePracticeRepository @Inject constructor(
                 dashboard = statsRow?.toDomain() ?: PracticeDashboard()
             )
             }
-        } catch (cancelled: CancellationException) {
+            return@withLock
+          } catch (cancelled: CancellationException) {
             _state.value = _state.value.copy(isLoading = false)
             throw cancelled
-        } catch (error: Exception) {
+          } catch (error: Exception) {
+            if (transientAttempt < 2 && error.isTransientNetworkFailure()) {
+                transientAttempt++
+                delay(350L * transientAttempt)
+                continue
+            }
             _state.value = _state.value.copy(
                 isLoading = false,
                 error = safeSupabaseError(error, networkStatus.hasValidatedInternet()),
                 canRetry = true
             )
             throw error
+          }
         }
     }
 
@@ -215,21 +224,80 @@ class SupabasePracticeRepository @Inject constructor(
         }
     }
 
-    override suspend fun applySessionAction(sessionId: String, action: SessionAction): ActiveJapSession = actionMutex.withLock {
-        val pending = pendingAction?.takeIf { it.sessionId == sessionId && it.action == action }
-            ?: PendingAction(UUID.randomUUID().toString(), sessionId, action).also { pendingAction = it }
+    override suspend fun applySessionAction(sessionId: String, action: SessionAction, operationId: String): ActiveJapSession = actionMutex.withLock {
         setSaving()
         try {
             val row = traced("rpc.apply_jap_session_action") {
                 client().postgrest.rpc(
                     "apply_jap_session_action",
-                    SessionActionArgs(sessionId, pending.operationId, action.name.lowercase(), ZoneId.systemDefault().id)
+                    SessionActionArgs(sessionId, operationId, action.name.lowercase(), ZoneId.systemDefault().id)
                 ).decodeList<SessionRow>().single()
             }
-            pendingAction = null
+            val previous = _state.value.activeSession?.takeIf { it.id == sessionId }
+            val durationRow = if (action == SessionAction.PAUSE || action == SessionAction.RESUME) {
+                sessionDurations(listOf(row.id))[row.id]
+            } else null
+            val duration = durationRow?.seconds ?: previous?.durationSeconds ?: 0L
+            val paused = when (action) {
+                SessionAction.PAUSE -> true
+                SessionAction.RESUME, SessionAction.FINISH -> false
+                else -> previous?.isPaused ?: false
+            }
+            val updated = row.toDomain(
+                _state.value.naamTypes.associate { it.id to it.name },
+                SessionDuration(duration, paused)
+            )
+            _state.value = _state.value.copy(
+                activeSession = if (action == SessionAction.FINISH) null else updated,
+                isSaving = false,
+                message = if (action == SessionAction.FINISH) "Session saved to your account." else "Cloud session updated.",
+                error = null
+            )
+            if (action == SessionAction.FINISH) refreshAfterWrite()
+            updated
+        } catch (cancelled: CancellationException) {
+            _state.value = _state.value.copy(isSaving = false)
+            throw cancelled
+        } catch (error: Exception) {
+            _state.value = _state.value.copy(isSaving = false, error = safeSupabaseError(error, networkStatus.hasValidatedInternet()), canRetry = false)
+            throw error
+        }
+    }
+
+    override suspend fun deleteSession(sessionId: String) = actionMutex.withLock {
+        setSaving()
+        try {
+            traced("rpc.delete_jap_session") {
+                client().postgrest.rpc("delete_jap_session", SessionIdArgs(sessionId))
+            }
             refreshAfterWrite()
-            _state.value = _state.value.copy(message = if (action == SessionAction.FINISH) "Session saved to your account." else "Cloud session updated.", error = null)
-            _state.value.activeSession ?: row.toDomain(_state.value.naamTypes.associate { it.id to it.name }, SessionDuration(0, false))
+            _state.value = _state.value.copy(message = "Session deleted.", error = null)
+        } catch (cancelled: CancellationException) {
+            _state.value = _state.value.copy(isSaving = false)
+            throw cancelled
+        } catch (error: Exception) {
+            _state.value = _state.value.copy(isSaving = false, error = safeSupabaseError(error, networkStatus.hasValidatedInternet()), canRetry = false)
+            throw error
+        }
+    }
+
+    override suspend fun deleteManualRecord(recordId: String) = actionMutex.withLock {
+        val userId = currentUserId()
+        setSaving()
+        try {
+            val row = traced("manual_record.delete_check") {
+                client().from("jap_records").select(columns = Columns.list("id", "session_id")) {
+                    filter { eq("id", recordId); eq("user_id", userId) }
+                }.decodeSingle<RecordDeleteCheckRow>()
+            }
+            require(row.sessionId == null) { "Live session records must be deleted with their session." }
+            traced("manual_record.delete") {
+                client().from("jap_records").delete {
+                    filter { eq("id", recordId); eq("user_id", userId) }
+                }
+            }
+            refreshAfterWrite()
+            _state.value = _state.value.copy(message = "Record deleted.", error = null)
         } catch (cancelled: CancellationException) {
             _state.value = _state.value.copy(isSaving = false)
             throw cancelled
@@ -289,7 +357,6 @@ class SupabasePracticeRepository @Inject constructor(
     override fun clearForSignedOutUser() {
         activeUserId = null
         pendingStart = null
-        pendingAction = null
         pendingRecordIds.clear()
         _state.value = PracticeDataState()
     }
@@ -342,10 +409,16 @@ class SupabasePracticeRepository @Inject constructor(
         "Authentication is required."
     }
 
+    private fun Throwable.isTransientNetworkFailure(): Boolean =
+        generateSequence(this) { it.cause }.take(8).any {
+            it is java.io.IOException || it.javaClass.simpleName in setOf(
+                "ConnectTimeoutException", "SocketTimeoutException", "UnknownHostException", "ConnectException", "HttpRequestTimeoutException"
+            )
+        }
+
     private fun client() = requireNotNull(provider.client) { "Supabase is not configured." }
 
     private data class PendingStart(val operationId: String, val naamId: String)
-    private data class PendingAction(val operationId: String, val sessionId: String, val action: SessionAction)
     private val pendingRecordIds = mutableMapOf<String, String>()
 
     @Serializable private data class DashboardArgs(@SerialName("p_timezone") val timeZone: String)
@@ -377,6 +450,7 @@ class SupabasePracticeRepository @Inject constructor(
     )
     @Serializable private data class DailyGoalArgs(@SerialName("p_target_count") val targetCount: Long)
     @Serializable private data class SessionIdsArgs(@SerialName("p_session_ids") val sessionIds: List<String>)
+    @Serializable private data class SessionIdArgs(@SerialName("p_session_id") val sessionId: String)
 
     @Serializable private data class NaamTypeRow(
         val id: String,
@@ -401,6 +475,10 @@ class SupabasePracticeRepository @Inject constructor(
         @SerialName("session_id") val sessionId: String,
         @SerialName("duration_seconds") val durationSeconds: Long,
         @SerialName("is_paused") val isPaused: Boolean?
+    )
+    @Serializable private data class RecordDeleteCheckRow(
+        val id: String,
+        @SerialName("session_id") val sessionId: String?
     )
     private data class SessionDuration(val seconds: Long, val paused: Boolean)
 

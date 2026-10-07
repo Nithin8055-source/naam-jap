@@ -22,6 +22,9 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -40,26 +43,77 @@ import com.naamjap.app.ui.theme.JapSpacing
 import com.naamjap.app.ui.theme.NaamJapTheme
 import androidx.compose.ui.tooling.preview.Preview
 
-data class HistoryUiState(val records: List<com.naamjap.app.domain.repository.PracticeHistoryItem> = emptyList(), val error: String? = null)
+data class HistoryUiState(
+    val records: List<com.naamjap.app.domain.repository.PracticeHistoryItem> = emptyList(),
+    val error: String? = null,
+    val isLoading: Boolean = true,
+    val deletingId: String? = null,
+    val deletionError: String? = null,
+    val lastDeletedId: String? = null
+)
 
 @HiltViewModel
 class HistoryViewModel @Inject constructor(
     private val repository: com.naamjap.app.domain.repository.PracticeRepository,
+    private val auth: com.naamjap.app.domain.repository.AuthRepository,
     private val networkStatus: NetworkStatus
 ) : ViewModel() {
     private val _state = MutableStateFlow(HistoryUiState())
     val state: StateFlow<HistoryUiState> = _state
     init { refresh() }
     fun refresh() { viewModelScope.launch {
+        _state.value = _state.value.copy(isLoading = true, error = null)
         try {
             repository.refresh(java.time.ZoneId.systemDefault().id)
-            _state.value = HistoryUiState(repository.loadHistoryPage(0, 100))
+            _state.value = _state.value.copy(records = loadAllHistory(), isLoading = false, error = null)
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            _state.value = _state.value.copy(isLoading = false)
             throw cancelled
         } catch (error: Exception) {
-            _state.value = HistoryUiState(error = safeSupabaseError(error, networkStatus.hasValidatedInternet()))
+            _state.value = _state.value.copy(isLoading = false, error = safeSupabaseError(error, networkStatus.hasValidatedInternet()))
         }
     } } }
+
+    fun deleteSession(id: String, password: String) = deleteWithPassword(id, password) { repository.deleteSession(id) }
+    fun deleteManualRecord(id: String, password: String) = deleteWithPassword(id, password) { repository.deleteManualRecord(id) }
+    fun clearDeletionError() { _state.value = _state.value.copy(deletionError = null) }
+
+    private fun deleteWithPassword(id: String, password: String, operation: suspend () -> Unit) = viewModelScope.launch {
+        _state.value = _state.value.copy(deletingId = id, deletionError = null, lastDeletedId = null)
+        try {
+            auth.reauthenticate(password)
+            operation()
+            repository.refresh(java.time.ZoneId.systemDefault().id)
+            _state.value = _state.value.copy(
+                records = loadAllHistory(),
+                deletingId = null,
+                deletionError = null,
+                lastDeletedId = id,
+                error = null
+            )
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            _state.value = _state.value.copy(deletingId = null)
+            throw cancelled
+        } catch (error: Exception) {
+            val rawMessage = error.message.orEmpty().lowercase()
+            val message = if ("invalid login credentials" in rawMessage || "invalid credentials" in rawMessage) {
+                "That password is incorrect. Try again."
+            } else safeSupabaseError(error, networkStatus.hasValidatedInternet())
+            _state.value = _state.value.copy(deletingId = null, deletionError = message)
+        }
+    }
+
+    private suspend fun loadAllHistory(): List<com.naamjap.app.domain.repository.PracticeHistoryItem> {
+        val all = mutableListOf<com.naamjap.app.domain.repository.PracticeHistoryItem>()
+        var offset = 0
+        while (true) {
+            val page = repository.loadHistoryPage(offset, 100)
+            all += page
+            if (page.size < 100) return all
+            offset += page.size
+        }
+    }
+}
 
 @Preview(showBackground = true)
 @Composable
@@ -70,19 +124,48 @@ private fun HistoryScreenPreview() {
 @Composable
 fun HistoryScreen(viewModel: HistoryViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    var deleteTarget by remember { mutableStateOf<com.naamjap.app.domain.repository.PracticeHistoryItem?>(null) }
+    var deletePassword by remember { mutableStateOf("") }
+    LaunchedEffect(state.lastDeletedId) {
+        if (state.lastDeletedId != null && state.lastDeletedId == deleteTarget?.id) {
+            deleteTarget = null
+            deletePassword = ""
+        }
+    }
     val today = remember { LocalDate.now() }
     var month by rememberSaveable { mutableStateOf(YearMonth.from(today).toString()) }
     var selectedDate by rememberSaveable { mutableStateOf(today.toString()) }
+    var activityFilter by rememberSaveable { mutableStateOf("Daily") }
     val displayedMonth = YearMonth.parse(month)
     val formatter = remember { DateTimeFormatter.ofPattern("MMMM yyyy") }
     val leadingBlanks = displayedMonth.atDay(1).dayOfWeek.value - 1
     val days = (1..displayedMonth.lengthOfMonth()).toList()
     val cells = List(leadingBlanks) { 0 } + days
     val weeks = cells.chunked(7).map { week -> week + List(7 - week.size) { 0 } }
+    val selectedDay = LocalDate.parse(selectedDate)
+    val visibleRecords = state.records.filter { record ->
+        record.date == selectedDay && when (activityFilter) {
+            "Sessions" -> record.isSession
+            "Manual" -> !record.isSession
+            else -> true
+        }
+    }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = JapSpacing.lg, top = JapSpacing.md, end = JapSpacing.lg, bottom = 104.dp)) {
         Text("Your practice", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text("History", style = MaterialTheme.typography.headlineLarge)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(JapSpacing.xs)) {
+            listOf("Daily", "Sessions", "Manual").forEach { filter ->
+                FilterChip(
+                    selected = activityFilter == filter,
+                    onClick = { activityFilter = filter },
+                    label = { Text(filter) }
+                )
+            }
+        }
+        if (state.isLoading && state.records.isEmpty()) {
+            CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
+        }
         if (state.error != null) {
             PremiumCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(JapSpacing.md), verticalArrangement = Arrangement.spacedBy(JapSpacing.xs)) {
@@ -124,24 +207,82 @@ fun HistoryScreen(viewModel: HistoryViewModel = hiltViewModel()) {
         Text(LocalDate.parse(selectedDate).format(DateTimeFormatter.ofPattern("MMMM d, yyyy")), style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(JapSpacing.sm))
         Row(horizontalArrangement = Arrangement.spacedBy(JapSpacing.sm)) {
-            StatCard("Total Naam Jap", state.records.filter { it.date == LocalDate.parse(selectedDate) }.sumOf { it.count }.toString(), Modifier.weight(1f))
-            StatCard("Sessions", state.records.count { it.date == LocalDate.parse(selectedDate) && it.isSession }.toString(), Modifier.weight(1f))
+            StatCard("Total Naam Jap", com.naamjap.app.ui.components.formatCount(visibleRecords.sumOf { it.count }), Modifier.weight(1f))
+            StatCard("Sessions", visibleRecords.count { it.isSession }.toString(), Modifier.weight(1f))
         }
         Spacer(Modifier.height(JapSpacing.lg))
         SectionHeader("Activity")
         Spacer(Modifier.height(JapSpacing.xs))
         GlassSurface(Modifier.fillMaxWidth()) {
-            val selectedRecords = state.records.filter { it.date == LocalDate.parse(selectedDate) }
+            val selectedRecords = visibleRecords
             if (selectedRecords.isEmpty()) {
                 EmptyState("No records for this day", "When you add practice records, sessions and manual entries will appear here.")
             } else {
                 LazyColumn(Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
                     itemsIndexed(selectedRecords) { index, record ->
                         if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .6f))
-                        SessionRow(record.naamName, record.count.toString(), record.date.toString(), if (record.isSession) "Session" else "Manual")
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = JapSpacing.md, vertical = JapSpacing.sm),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(JapSpacing.sm)
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(if (record.isSession) "Live session" else "Daily entry", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                                Text(record.naamName, style = MaterialTheme.typography.titleSmall)
+                                Text("${com.naamjap.app.ui.components.formatCount(record.count)} Naam Jap · ${record.sortAt.atZone(java.time.ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("h:mm a"))}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                if (record.durationSeconds != null) Text("Duration ${formatDuration(record.durationSeconds)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                record.note?.takeIf(String::isNotBlank)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                            }
+                            TextButton(onClick = { deleteTarget = record; deletePassword = ""; viewModel.clearDeletionError() }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                        }
                     }
                 }
             }
         }
     }
+
+    deleteTarget?.let { target ->
+        val isDeleting = state.deletingId == target.id
+        AlertDialog(
+            onDismissRequest = { if (!isDeleting) deleteTarget = null },
+            title = { Text(if (target.isSession) "Delete this session?" else "Delete this daily entry?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(JapSpacing.sm)) {
+                    Text("Confirm your account password to delete this item.")
+                    OutlinedTextField(
+                        value = deletePassword,
+                        onValueChange = { deletePassword = it },
+                        label = { Text("Password") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        enabled = !isDeleting,
+                        singleLine = true
+                    )
+                    state.deletionError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    if (isDeleting) LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = deletePassword.isNotBlank() && !isDeleting,
+                    onClick = {
+                        val password = deletePassword
+                        deletePassword = ""
+                        if (target.isSession) viewModel.deleteSession(target.id, password)
+                        else viewModel.deleteManualRecord(target.id, password)
+                    }
+                ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(enabled = !isDeleting, onClick = { deleteTarget = null; deletePassword = ""; viewModel.clearDeletionError() }) { Text("Cancel") } }
+        )
+    }
+
+}
+
+private fun formatDuration(seconds: Long): String {
+    val safe = seconds.coerceAtLeast(0)
+    val hours = safe / 3600
+    val minutes = safe % 3600 / 60
+    val remainder = safe % 60
+    return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, remainder) else "%d:%02d".format(minutes, remainder)
 }

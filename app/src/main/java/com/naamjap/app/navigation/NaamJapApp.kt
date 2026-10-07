@@ -36,6 +36,7 @@ import com.naamjap.app.feature.settings.SettingsScreen
 import com.naamjap.app.feature.jap.ManualRecordScreen
 import com.naamjap.app.ui.components.GlassBottomBar
 import com.naamjap.app.ui.components.PremiumScaffold
+import com.naamjap.app.ui.components.navigationContentBottomInset
 import com.naamjap.app.ui.theme.ThemeChoice
 import com.naamjap.app.domain.model.AccountIdentity
 import com.naamjap.app.domain.repository.PracticeRepository
@@ -97,7 +98,7 @@ fun NaamJapApp(
         feedbackMessage = practiceState.error,
         onFeedbackRetry = if (practiceState.canRetry) feedbackViewModel::retry else null,
         bottomBar = {
-            Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
+            Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp).padding(bottom = 8.dp)) {
                 GlassBottomBar(selectedRoute = currentRoute?.takeIf { route -> Destination.primary.any { it.route == route } }, onSelect = ::navigateToPrimary, hazeState = hazeState)
             }
         }
@@ -112,6 +113,7 @@ fun NaamJapApp(
             popExitTransition = { slideOutHorizontally(animationSpec = tween(380, easing = FastOutSlowInEasing)) { width -> width / 6 } + fadeOut(tween(220)) },
             modifier = Modifier
                 .padding(innerPadding)
+                .padding(bottom = navigationContentBottomInset())
                 .hazeSource(hazeState)
                 .imePadding()
                 .pointerInput(currentRoute, isPrimaryRoute) {

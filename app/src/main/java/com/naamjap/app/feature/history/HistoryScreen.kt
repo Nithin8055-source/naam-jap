@@ -12,9 +12,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material3.*
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
-import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
-import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -53,7 +50,7 @@ data class HistoryUiState(
     val records: List<com.naamjap.app.domain.repository.PracticeHistoryItem> = emptyList(),
     val error: String? = null,
     val isLoading: Boolean = true,
-    val isRefreshing: Boolean = false,
+    val isUserRefreshing: Boolean = false,
     val deletingId: String? = null,
     val deletionError: String? = null,
     val lastDeletedId: String? = null
@@ -69,13 +66,16 @@ class HistoryViewModel @Inject constructor(
     val state: StateFlow<HistoryUiState> = _state
     private var refreshJob: kotlinx.coroutines.Job? = null
 
-    fun refresh() {
-        if (refreshJob?.isActive == true) return
+    fun refresh(userInitiated: Boolean = false) {
+        if (refreshJob?.isActive == true) {
+            if (userInitiated) _state.value = _state.value.copy(isUserRefreshing = true)
+            return
+        }
         refreshJob = viewModelScope.launch {
             val hasRecords = _state.value.records.isNotEmpty()
             _state.value = _state.value.copy(
                 isLoading = !hasRecords,
-                isRefreshing = true,
+                isUserRefreshing = userInitiated,
                 error = null
             )
             try {
@@ -84,16 +84,16 @@ class HistoryViewModel @Inject constructor(
                 _state.value = _state.value.copy(
                     records = freshRecords.toList(),
                     isLoading = false,
-                    isRefreshing = false,
+                    isUserRefreshing = false,
                     error = null
                 )
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                _state.value = _state.value.copy(isLoading = false, isRefreshing = false)
+                _state.value = _state.value.copy(isLoading = false, isUserRefreshing = false)
                 throw cancelled
             } catch (error: Exception) {
                 _state.value = _state.value.copy(
                     isLoading = false,
-                    isRefreshing = false,
+                    isUserRefreshing = false,
                     error = safeSupabaseError(
                         error,
                         networkStatus.hasValidatedInternet()
@@ -168,7 +168,6 @@ private fun HistoryScreenPreview() {
 @OptIn(ExperimentalMaterial3Api::class)
 fun HistoryScreen(viewModel: HistoryViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val pullRefreshState = rememberPullToRefreshState()
     var deleteTarget by remember { mutableStateOf<com.naamjap.app.domain.repository.PracticeHistoryItem?>(null) }
     var deletePassword by remember { mutableStateOf("") }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refresh() }
@@ -197,22 +196,12 @@ fun HistoryScreen(viewModel: HistoryViewModel = hiltViewModel()) {
         }
     }
 
-    PullToRefreshBox(
-        isRefreshing = state.isRefreshing,
-        onRefresh = viewModel::refresh,
-        state = pullRefreshState,
+    PremiumPullToRefreshBox(
+        isRefreshing = state.isUserRefreshing,
+        onRefresh = { viewModel.refresh(userInitiated = true) },
         modifier = Modifier.fillMaxSize(),
-        indicator = {
-            PullToRefreshDefaults.Indicator(
-                state = pullRefreshState,
-                isRefreshing = state.isRefreshing,
-                modifier = Modifier.align(Alignment.TopCenter),
-                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = .94f),
-                color = MaterialTheme.colorScheme.primary
-            )
-        }
     ) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = JapSpacing.lg, top = JapSpacing.md, end = JapSpacing.lg, bottom = 104.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = JapSpacing.lg, top = JapSpacing.md, end = JapSpacing.lg)) {
         Text("Your practice", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text("History", style = MaterialTheme.typography.headlineLarge)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(JapSpacing.xs)) {
@@ -231,7 +220,7 @@ fun HistoryScreen(viewModel: HistoryViewModel = hiltViewModel()) {
             PremiumCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(JapSpacing.md), verticalArrangement = Arrangement.spacedBy(JapSpacing.xs)) {
                     Text(state.error.orEmpty(), color = MaterialTheme.colorScheme.error)
-                    TextButton(onClick = viewModel::refresh) { Text("Retry") }
+                    TextButton(onClick = { viewModel.refresh() }) { Text("Retry") }
                 }
             }
         }

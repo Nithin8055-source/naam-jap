@@ -3,34 +3,43 @@ package com.naamjap.app.feature.settings
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.IconButton
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.viewModelScope
 import com.naamjap.app.data.remote.NetworkStatus
 import com.naamjap.app.data.remote.safeSupabaseError
 import com.naamjap.app.domain.model.AccountIdentity
+import com.naamjap.app.domain.repository.NaamType
 import com.naamjap.app.domain.repository.PracticeRepository
 import com.naamjap.app.ui.components.GlassSurface
-import com.naamjap.app.ui.components.LotusMark
+import com.naamjap.app.ui.components.PremiumPullToRefreshBox
 import com.naamjap.app.ui.theme.JapSpacing
 import com.naamjap.app.ui.theme.NaamJapTheme
 import com.naamjap.app.ui.theme.ThemeChoice
+import com.naamjap.app.R
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
@@ -43,7 +52,9 @@ data class SettingsUiState(
     val subtitle: String = "",
     val message: String? = null,
     val error: String? = null,
+    val loadError: String? = null,
     val isSaving: Boolean = false,
+    val isUserRefreshing: Boolean = false,
     val isPasswordUpdating: Boolean = false,
     val passwordUpdated: Boolean = false
 )
@@ -58,23 +69,41 @@ class SettingsViewModel @Inject constructor(
     val data = practice.state
     private val _state = MutableStateFlow(SettingsUiState())
     val state: StateFlow<SettingsUiState> = _state
+    private var refreshJob: kotlinx.coroutines.Job? = null
 
     init {
-        viewModelScope.launch {
+        refresh()
+    }
+
+    fun refresh(userInitiated: Boolean = false) {
+        if (refreshJob?.isActive == true) {
+            if (userInitiated) _state.value = _state.value.copy(isUserRefreshing = true)
+            return
+        }
+        refreshJob = viewModelScope.launch {
+            _state.value = _state.value.copy(loadError = null, isUserRefreshing = userInitiated)
             try {
-                val profile = profiles.getCurrentProfile()
-                _state.value = _state.value.copy(displayName = profile.displayName, subtitle = profile.email.orEmpty())
+                var loadError: String? = null
+                try {
+                    val profile = profiles.getCurrentProfile()
+                    _state.value = _state.value.copy(displayName = profile.displayName, subtitle = profile.email.orEmpty())
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    loadError = safeSupabaseError(error, networkStatus.hasValidatedInternet())
+                }
+                try {
+                    practice.refresh(java.time.ZoneId.systemDefault().id)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    if (loadError == null) loadError = safeSupabaseError(error, networkStatus.hasValidatedInternet())
+                }
+                _state.value = _state.value.copy(loadError = loadError)
             } catch (cancelled: CancellationException) {
                 throw cancelled
-            } catch (_: Exception) {
-                // Keep the signed-in account fallback when profile details cannot be loaded.
-            }
-            try {
-                practice.refresh(java.time.ZoneId.systemDefault().id)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                // PracticeRepository publishes the operation error in its shared state.
+            } finally {
+                _state.value = _state.value.copy(isUserRefreshing = false)
             }
         }
     }
@@ -96,6 +125,12 @@ class SettingsViewModel @Inject constructor(
 
     fun setDefaultNaam(id: String) = runAction("Naam type could not be changed.", "Default Naam updated.") {
         practice.setDefaultNaamType(id)
+    }
+
+    fun deleteNaamType(id: String, password: String) = runAction("Naam type could not be deleted.", "Naam type deleted.") {
+        require(password.isNotBlank()) { "Enter your password to confirm deletion." }
+        auth.reauthenticate(password)
+        practice.deleteNaamType(id)
     }
 
     fun changePassword(currentPassword: String, newPassword: String, confirmation: String) = viewModelScope.launch {
@@ -121,7 +156,9 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun deleteAccount() = runAction("Account deletion could not be completed.", "Account deletion completed.") {
+    fun deleteAccount(password: String) = runAction("Account deletion could not be completed.", "Account deletion completed.") {
+        require(password.isNotBlank()) { "Enter your password to confirm account deletion." }
+        auth.reauthenticate(password)
         profiles.deleteCurrentAccount()
     }
 
@@ -135,8 +172,12 @@ class SettingsViewModel @Inject constructor(
             _state.value = _state.value.copy(isSaving = false)
             throw cancelled
         } catch (error: Exception) {
-            val message = if (error is IllegalArgumentException) error.message ?: errorMessage
-            else safeSupabaseError(error, networkStatus.hasValidatedInternet())
+            val raw = error.message.orEmpty().lowercase()
+            val message = when {
+                "invalid login credentials" in raw || "invalid credentials" in raw -> "That password is incorrect. Try again."
+                error is IllegalArgumentException -> error.message ?: errorMessage
+                else -> safeSupabaseError(error, networkStatus.hasValidatedInternet())
+            }
             _state.value = _state.value.copy(isSaving = false, error = message, message = null)
         }
     }
@@ -160,6 +201,7 @@ fun SettingsScreen(
     val practice by viewModel.data.collectAsStateWithLifecycle()
     var confirmSignOut by rememberSaveable { mutableStateOf(false) }
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
+    var deleteNaamTarget by remember { mutableStateOf<NaamType?>(null) }
     var changePasswordOpen by rememberSaveable { mutableStateOf(false) }
     var editName by rememberSaveable { mutableStateOf(false) }
     var selectNaamOpen by rememberSaveable { mutableStateOf(false) }
@@ -168,6 +210,8 @@ fun SettingsScreen(
     var currentPassword by remember { mutableStateOf("") }
     var newPassword by remember { mutableStateOf("") }
     var confirmNewPassword by remember { mutableStateOf("") }
+    var naamDeletePassword by remember { mutableStateOf("") }
+    var accountDeletePassword by remember { mutableStateOf("") }
     var nameDraft by rememberSaveable { mutableStateOf("") }
     var goalDraft by remember { mutableStateOf("") }
     var naamDraft by rememberSaveable { mutableStateOf("") }
@@ -178,6 +222,8 @@ fun SettingsScreen(
             "Naam type added." -> naamDraft = ""
             "Default Naam updated." -> selectNaamOpen = false
             "Profile saved." -> editName = false
+            "Naam type deleted." -> { deleteNaamTarget = null; naamDeletePassword = "" }
+            "Account deletion completed." -> { confirmDelete = false; accountDeletePassword = "" }
         }
     }
     LaunchedEffect(state.passwordUpdated) {
@@ -189,9 +235,15 @@ fun SettingsScreen(
         }
     }
 
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refresh() }
+    PremiumPullToRefreshBox(
+        isRefreshing = state.isUserRefreshing,
+        onRefresh = { viewModel.refresh(userInitiated = true) },
+        modifier = Modifier.fillMaxSize()
+    ) {
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState())
-            .padding(start = JapSpacing.lg, top = JapSpacing.md, end = JapSpacing.lg, bottom = 116.dp),
+            .padding(start = JapSpacing.lg, top = JapSpacing.md, end = JapSpacing.lg),
         verticalArrangement = Arrangement.spacedBy(JapSpacing.md)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(JapSpacing.sm)) {
@@ -208,7 +260,12 @@ fun SettingsScreen(
                 horizontalArrangement = Arrangement.spacedBy(JapSpacing.md)
             ) {
                 Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary.copy(alpha = .16f), modifier = Modifier.size(54.dp)) {
-                    Box(contentAlignment = Alignment.Center) { LotusMark(Modifier.size(40.dp), "Naam Jap lotus logo") }
+                    Image(
+                        painter = painterResource(R.drawable.lotus_photo),
+                        contentDescription = "Lotus flower",
+                        modifier = Modifier.fillMaxSize().padding(3.dp).clip(CircleShape),
+                        contentScale = ContentScale.Crop
+                    )
                 }
                 Column(Modifier.weight(1f)) {
                     Text(state.displayName.ifBlank { account?.displayName?.takeIf(String::isNotBlank) ?: "Signed-in account" }, style = MaterialTheme.typography.titleMedium)
@@ -218,8 +275,8 @@ fun SettingsScreen(
             }
         }
 
-        (state.error ?: state.message)?.let { message ->
-            val messageColor = if (state.error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+        (state.error ?: state.loadError ?: state.message)?.let { message ->
+            val messageColor = if (state.error != null || state.loadError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = MaterialTheme.shapes.medium,
@@ -326,24 +383,36 @@ fun SettingsScreen(
         }
 
     }
+    }
 
     if (selectNaamOpen) {
         AlertDialog(
             onDismissRequest = { if (!state.isSaving) selectNaamOpen = false },
             title = { Text("Choose Naam / Mantra") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(JapSpacing.xs)) {
+                Column(
+                    Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(JapSpacing.xs)
+                ) {
                     if (practice.naamTypes.isEmpty()) Text("Add a Naam type below to choose one.")
                     else {
                         practice.naamTypes.forEach { naam ->
-                            SettingRow(
-                                icon = if (naam.isDefault) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
-                                title = naam.name,
-                                value = if (naam.isDefault) "Selected" else "",
-                                onClick = { if (!naam.isDefault && !state.isSaving) viewModel.setDefaultNaam(naam.id) },
-                                enabled = !state.isSaving,
-                                showChevron = false
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                SettingRow(
+                                    icon = if (naam.isDefault) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                                    title = naam.name,
+                                    value = if (naam.isDefault) "Default · protected" else "Personal",
+                                    onClick = { if (!naam.isDefault && !state.isSaving) viewModel.setDefaultNaam(naam.id) },
+                                    enabled = !state.isSaving,
+                                    showChevron = false,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (!naam.isDefault) {
+                                    IconButton(onClick = { deleteNaamTarget = naam; naamDeletePassword = "" }, enabled = !state.isSaving) {
+                                        Icon(Icons.Default.DeleteOutline, contentDescription = "Delete ${naam.name}", tint = MaterialTheme.colorScheme.error)
+                                    }
+                                }
+                            }
                         }
                     }
                     state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -419,15 +488,66 @@ fun SettingsScreen(
     }
     if (confirmDelete) {
         AlertDialog(
-            onDismissRequest = { confirmDelete = false },
+            onDismissRequest = { if (!state.isSaving) { confirmDelete = false; accountDeletePassword = "" } },
             title = { Text("Delete account and data?") },
-            text = { Text("This permanently removes your account and its cloud practice data.") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(JapSpacing.sm)) {
+                    Text("This permanently removes your account and its cloud practice data. Confirm your password to continue.")
+                    OutlinedTextField(
+                        value = accountDeletePassword,
+                        onValueChange = { accountDeletePassword = it },
+                        label = { Text("Password") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        singleLine = true,
+                        enabled = !state.isSaving
+                    )
+                    state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    if (state.isSaving) LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
+            },
             confirmButton = {
-                TextButton(onClick = { confirmDelete = false; viewModel.deleteAccount() }, enabled = !state.isSaving) {
+                TextButton(onClick = {
+                    val password = accountDeletePassword
+                    accountDeletePassword = ""
+                    viewModel.deleteAccount(password)
+                }, enabled = !state.isSaving && accountDeletePassword.isNotBlank()) {
                     Text("Delete", color = MaterialTheme.colorScheme.error)
                 }
             },
-            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } }
+            dismissButton = { TextButton(onClick = { confirmDelete = false; accountDeletePassword = "" }, enabled = !state.isSaving) { Text("Cancel") } }
+        )
+    }
+    deleteNaamTarget?.let { naam ->
+        AlertDialog(
+            onDismissRequest = { if (!state.isSaving) { deleteNaamTarget = null; naamDeletePassword = "" } },
+            title = { Text("Delete ${naam.name}?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(JapSpacing.sm)) {
+                    Text("Enter your password to confirm. Saved practice using this Naam must be removed first.")
+                    OutlinedTextField(
+                        value = naamDeletePassword,
+                        onValueChange = { naamDeletePassword = it },
+                        label = { Text("Password") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        singleLine = true,
+                        enabled = !state.isSaving
+                    )
+                    state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    if (state.isSaving) LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = !state.isSaving && naamDeletePassword.isNotBlank(), onClick = {
+                    val password = naamDeletePassword
+                    naamDeletePassword = ""
+                    viewModel.deleteNaamType(naam.id, password)
+                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(enabled = !state.isSaving, onClick = { deleteNaamTarget = null; naamDeletePassword = "" }) { Text("Cancel") }
+            }
         )
     }
 }
@@ -440,11 +560,12 @@ private fun SettingRow(
     onClick: () -> Unit,
     enabled: Boolean = true,
     showChevron: Boolean = false,
-    destructive: Boolean = false
+    destructive: Boolean = false,
+    modifier: Modifier = Modifier
 ) {
     val tint = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 62.dp)
+        modifier.fillMaxWidth().heightIn(min = 62.dp)
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = JapSpacing.md, vertical = JapSpacing.xs),
         verticalAlignment = Alignment.CenterVertically,

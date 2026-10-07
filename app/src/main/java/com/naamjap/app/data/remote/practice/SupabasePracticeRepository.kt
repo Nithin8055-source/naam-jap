@@ -142,7 +142,12 @@ class SupabasePracticeRepository @Inject constructor(
         }
     }
 
-    override suspend fun loadHistoryPage(offset: Int, limit: Int): List<PracticeHistoryItem> = withContext(Dispatchers.IO) {
+    override suspend fun loadHistoryPage(
+        offset: Int,
+        limit: Int,
+        fromDate: LocalDate?,
+        throughDate: LocalDate?
+    ): List<PracticeHistoryItem> = withContext(Dispatchers.IO) {
         require(offset >= 0 && limit in 1..100) { "History page is invalid." }
         val userId = currentUserId()
         val page = offset.toLong()..(offset + limit - 1).toLong()
@@ -156,7 +161,11 @@ class SupabasePracticeRepository @Inject constructor(
         val naamById = nameRows.associate { it.id to it.name }
         val records = traced("history.jap_records.select") {
             client.from("jap_records").select(columns = Columns.list("id", "user_id", "naam_id", "count", "record_date", "notes", "created_at", "session_id")) {
-                filter { eq("user_id", userId) }
+                filter {
+                    eq("user_id", userId)
+                    if (fromDate != null) gte("record_date", fromDate.toString())
+                    if (throughDate != null) lte("record_date", throughDate.toString())
+                }
                 order("created_at", Order.DESCENDING)
                 order("id", Order.DESCENDING)
                 range(page)
@@ -207,6 +216,58 @@ class SupabasePracticeRepository @Inject constructor(
             error = null
         )
         selected
+    }
+
+    override suspend fun deleteNaamType(id: String) = actionMutex.withLock {
+        val userId = currentUserId()
+        setSaving()
+        try {
+            val selected = traced("naam_type.delete_check") {
+                client().from("naam_types").select(columns = Columns.list("id", "is_default")) {
+                    filter { eq("id", id); eq("user_id", userId) }
+                    limit(count = 1)
+                }.decodeList<NaamTypeDeleteCheckRow>().singleOrNull()
+            } ?: throw IllegalArgumentException("This Naam type was not found in your account. Refresh and try again.")
+
+            require(selected.isDefault == false) { "This Naam type is protected because its default status could not be cleared." }
+
+            val sessionReferences = traced("naam_type.delete_session_references") {
+                client().from("jap_sessions").select(columns = Columns.list("id")) {
+                    filter { eq("user_id", userId); eq("naam_id", id) }
+                    limit(count = 1)
+                }.decodeList<NaamTypeReferenceRow>().isNotEmpty()
+            }
+            val recordReferences = traced("naam_type.delete_record_references") {
+                client().from("jap_records").select(columns = Columns.list("id")) {
+                    filter { eq("user_id", userId); eq("naam_id", id) }
+                    limit(count = 1)
+                }.decodeList<NaamTypeReferenceRow>().isNotEmpty()
+            }
+            require(!sessionReferences && !recordReferences) {
+                "This Naam type is used by saved practice and cannot be deleted."
+            }
+
+            traced("naam_type.delete") {
+                client().from("naam_types").delete {
+                    filter { eq("id", id); eq("user_id", userId); eq("is_default", false) }
+                }
+            }
+            refreshAfterWrite()
+            check(_state.value.naamTypes.none { it.id == id }) {
+                "The delete was not confirmed by Supabase. Refresh and try again."
+            }
+            _state.value = _state.value.copy(message = "Naam type deleted.", error = null, isSaving = false)
+        } catch (cancelled: CancellationException) {
+            _state.value = _state.value.copy(isSaving = false)
+            throw cancelled
+        } catch (error: Exception) {
+            _state.value = _state.value.copy(
+                isSaving = false,
+                error = safeSupabaseError(error, networkStatus.hasValidatedInternet()),
+                canRetry = false
+            )
+            throw error
+        }
     }
 
     override suspend fun startSession(naamId: String): ActiveJapSession = actionMutex.withLock {
@@ -477,6 +538,12 @@ class SupabasePracticeRepository @Inject constructor(
         val name: String,
         @SerialName("is_default") val isDefault: Boolean? = false
     ) { fun toDomain() = NaamType(id, name, isDefault == true) }
+
+    @Serializable private data class NaamTypeDeleteCheckRow(
+        val id: String,
+        @SerialName("is_default") val isDefault: Boolean?
+    )
+    @Serializable private data class NaamTypeReferenceRow(val id: String)
 
     @Serializable private data class SessionRow(
         val id: String,

@@ -56,10 +56,16 @@ enum class SessionAction { INCREMENT, UNDO, PAUSE, RESUME, FINISH }
 interface PracticeRepository {
     val state: StateFlow<PracticeDataState>
     suspend fun refresh(timeZoneId: String)
-    suspend fun loadHistoryPage(offset: Int, limit: Int = 50): List<PracticeHistoryItem>
+    suspend fun loadHistoryPage(
+        offset: Int,
+        limit: Int = 50,
+        fromDate: LocalDate? = null,
+        throughDate: LocalDate? = null
+    ): List<PracticeHistoryItem>
     suspend fun ensureDefaultNaamType(): NaamType
     suspend fun createNaamType(name: String): NaamType
     suspend fun setDefaultNaamType(id: String): NaamType
+    suspend fun deleteNaamType(id: String)
     suspend fun startSession(naamId: String): ActiveJapSession
     suspend fun applySessionAction(
         sessionId: String,

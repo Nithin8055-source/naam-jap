@@ -19,6 +19,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -66,26 +68,12 @@ class JapViewModel @Inject constructor(private val repository: com.naamjap.app.d
     private val increments = Channel<QueuedIncrement>(Channel.UNLIMITED)
     private val pendingActions = mutableMapOf<Pair<String, com.naamjap.app.domain.repository.SessionAction>, String>()
     private val actionsInFlight = mutableSetOf<Pair<String, com.naamjap.app.domain.repository.SessionAction>>()
+    private val _isUserRefreshing = MutableStateFlow(false)
+    val isUserRefreshing = _isUserRefreshing.asStateFlow()
+    private var refreshJob: kotlinx.coroutines.Job? = null
 
     init {
-        viewModelScope.launch {
-            try {
-                repository.refresh(java.time.ZoneId.systemDefault().id)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                // The repository exposes retryable load errors through its state.
-            }
-            if (repository.state.value.naamTypes.isEmpty()) {
-                try {
-                    repository.ensureDefaultNaamType()
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (_: Exception) {
-                    // Keep the empty state actionable; do not mask coroutine cancellation.
-                }
-            }
-        }
+        refresh()
         viewModelScope.launch {
             for (increment in increments) {
                 var succeeded = false
@@ -110,6 +98,26 @@ class JapViewModel @Inject constructor(private val repository: com.naamjap.app.d
                 _optimisticCount.value = _optimisticCount.value?.let { current ->
                     if (current.sessionId == increment.sessionId && current.target <= serverCount) null else current
                 }
+            }
+        }
+    }
+
+    fun refresh(userInitiated: Boolean = false) {
+        if (refreshJob?.isActive == true) {
+            if (userInitiated) _isUserRefreshing.value = true
+            return
+        }
+        refreshJob = viewModelScope.launch {
+            _isUserRefreshing.value = userInitiated
+            try {
+                repository.refresh(java.time.ZoneId.systemDefault().id)
+                if (repository.state.value.naamTypes.isEmpty()) repository.ensureDefaultNaamType()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Repository state retains its last successful session and publishes the load error.
+            } finally {
+                _isUserRefreshing.value = false
             }
         }
     }
@@ -162,6 +170,7 @@ class JapViewModel @Inject constructor(private val repository: com.naamjap.app.d
 @Composable
 fun JapScreen(viewModel: JapViewModel = hiltViewModel()) {
     val data by viewModel.data.collectAsStateWithLifecycle()
+    val isUserRefreshing by viewModel.isUserRefreshing.collectAsStateWithLifecycle()
     val active = data.activeSession
     val optimisticCount by viewModel.optimisticCount.collectAsStateWithLifecycle()
     val displayedCount = maxOf(active?.count ?: 0L, optimisticCount?.takeIf { it.sessionId == active?.id }?.target ?: 0L)
@@ -185,8 +194,14 @@ fun JapScreen(viewModel: JapViewModel = hiltViewModel()) {
     val countPressed by countInteraction.collectIsPressedAsState()
     val countScale by androidx.compose.animation.core.animateFloatAsState(if (countPressed) .96f else 1f, label = "count button press")
     val haptics = LocalHapticFeedback.current
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refresh() }
+    PremiumPullToRefreshBox(
+        isRefreshing = isUserRefreshing,
+        onRefresh = { viewModel.refresh(userInitiated = true) },
+        modifier = Modifier.fillMaxSize()
+    ) {
     Box(Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = JapSpacing.xl, top = JapSpacing.lg, end = JapSpacing.xl, bottom = 112.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = JapSpacing.xl, top = JapSpacing.lg, end = JapSpacing.xl), horizontalAlignment = Alignment.CenterHorizontally) {
             Text("Naam Jap", style = MaterialTheme.typography.headlineMedium)
             Spacer(Modifier.height(JapSpacing.xs))
             Text(if (active == null) "Choose a naam and begin" else if (active.isPaused) "Paused" else "Session in progress", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -195,7 +210,12 @@ fun JapScreen(viewModel: JapViewModel = hiltViewModel()) {
                 Image(painterResource(R.drawable.ic_sacred_halo), null, Modifier.fillMaxSize().alpha(.13f), contentScale = ContentScale.Fit)
                 JapCircularProgressIndicator(progress = 0f, modifier = Modifier.size(272.dp), strokeWidth = 5.dp) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        OmSymbol(Modifier.size(28.dp), null)
+                        Image(
+                            painter = painterResource(R.drawable.mala_beads),
+                            contentDescription = "Prayer beads decoration; this is a numerical counter",
+                            modifier = Modifier.size(48.dp).clip(CircleShape),
+                            contentScale = ContentScale.Crop
+                        )
                         AnimatedContent(targetState = formattedCount, label = "session count") {
                             Text(
                                 it,
@@ -250,6 +270,7 @@ fun JapScreen(viewModel: JapViewModel = hiltViewModel()) {
         }
         data.error?.let { Text(it, Modifier.align(Alignment.BottomCenter).padding(bottom = 64.dp, start = 20.dp, end = 20.dp), color = MaterialTheme.colorScheme.error) }
         SnackbarHost(snackbarHostState, Modifier.align(Alignment.BottomCenter))
+    }
     }
 }
 

@@ -38,6 +38,7 @@ import com.naamjap.app.ui.components.EmptyState
 import com.naamjap.app.ui.components.GlassSurface
 import com.naamjap.app.ui.components.GoalProgressCard
 import com.naamjap.app.ui.components.PremiumCard
+import com.naamjap.app.ui.components.PremiumPullToRefreshBox
 import com.naamjap.app.ui.components.QuickActionItem
 import com.naamjap.app.ui.components.SectionHeader
 import com.naamjap.app.ui.components.SessionRow
@@ -55,7 +56,8 @@ import kotlinx.coroutines.launch
 data class HomeUiState(
     val recentRecords: List<PracticeHistoryItem> = emptyList(),
     val isLoading: Boolean = true,
-    val historyError: String? = null
+    val historyError: String? = null,
+    val isUserRefreshing: Boolean = false
 )
 
 @HiltViewModel
@@ -67,10 +69,17 @@ class HomeViewModel @Inject constructor(
     val data = repository.state
     private var refreshJob: kotlinx.coroutines.Job? = null
 
-    fun refresh() {
-        if (refreshJob?.isActive == true) return
+    fun refresh(userInitiated: Boolean = false) {
+        if (refreshJob?.isActive == true) {
+            if (userInitiated) _state.value = _state.value.copy(isUserRefreshing = true)
+            return
+        }
         refreshJob = viewModelScope.launch {
-            _state.value = _state.value.copy(isLoading = true, historyError = null)
+            _state.value = _state.value.copy(
+                isLoading = _state.value.recentRecords.isEmpty(),
+                historyError = null,
+                isUserRefreshing = userInitiated
+            )
             try {
                 repository.refresh(ZoneId.systemDefault().id)
                 _state.value = HomeUiState(recentRecords = repository.loadHistoryPage(0, 5), isLoading = false)
@@ -82,6 +91,8 @@ class HomeViewModel @Inject constructor(
                     isLoading = false,
                     historyError = repository.state.value.error ?: "Recent activity couldn't be loaded. Try again."
                 )
+            } finally {
+                _state.value = _state.value.copy(isUserRefreshing = false)
             }
         }
     }
@@ -92,6 +103,11 @@ fun HomeScreen(onNavigate: (String) -> Unit, displayName: String? = null, viewMo
     val data by viewModel.data.collectAsStateWithLifecycle()
     val state by viewModel.state.collectAsStateWithLifecycle()
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refresh() }
+    PremiumPullToRefreshBox(
+        isRefreshing = state.isUserRefreshing,
+        onRefresh = { viewModel.refresh(userInitiated = true) },
+        modifier = Modifier.fillMaxSize()
+    ) {
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = JapSpacing.lg, vertical = JapSpacing.md),
         verticalArrangement = Arrangement.spacedBy(JapSpacing.md)
@@ -122,7 +138,7 @@ fun HomeScreen(onNavigate: (String) -> Unit, displayName: String? = null, viewMo
             PremiumCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(JapSpacing.md), verticalArrangement = Arrangement.spacedBy(JapSpacing.xs)) {
                     Text(data.error ?: "Your practice data isn't available yet.", color = MaterialTheme.colorScheme.error)
-                    TextButton(onClick = viewModel::refresh) { Text("Retry") }
+                    TextButton(onClick = { viewModel.refresh() }) { Text("Retry") }
                 }
             }
         } else {
@@ -173,7 +189,7 @@ fun HomeScreen(onNavigate: (String) -> Unit, displayName: String? = null, viewMo
                 state.historyError != null -> PremiumCard(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(JapSpacing.md)) {
                         Text(state.historyError.orEmpty(), color = MaterialTheme.colorScheme.error)
-                        TextButton(onClick = viewModel::refresh) { Text("Retry") }
+                        TextButton(onClick = { viewModel.refresh() }) { Text("Retry") }
                     }
                 }
                 state.recentRecords.isEmpty() -> EmptyState("Your practice begins here", "Completed sessions and manual records appear here.")
@@ -182,5 +198,6 @@ fun HomeScreen(onNavigate: (String) -> Unit, displayName: String? = null, viewMo
                 }
             }
         }
+    }
     }
 }

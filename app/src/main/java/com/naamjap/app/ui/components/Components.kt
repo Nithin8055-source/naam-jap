@@ -9,10 +9,14 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.Image
 import androidx.compose.runtime.Composable
@@ -20,18 +24,21 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -67,7 +74,8 @@ fun PremiumScaffold(
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = { NaamJapTopAppBar() },
-        snackbarHost = { SnackbarHost(snackbarHostState) }
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { innerPadding ->
         // Keep the destination behind the floating glass pill so Haze samples page content,
         // and no Scaffold bottom-bar slot paints a solid rectangle around the pill.
@@ -76,6 +84,39 @@ fun PremiumScaffold(
             Box(Modifier.align(Alignment.BottomCenter)) { bottomBar() }
         }
     }
+}
+
+/** Space reserved in the destination viewport so the last scroll item can clear the floating pill. */
+@Composable
+fun navigationContentBottomInset(): Dp = with(LocalDensity.current) {
+    WindowInsets.navigationBars.getBottom(this).toDp() + 80.dp
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun PremiumPullToRefreshBox(
+    isRefreshing: Boolean,
+    onRefresh: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable BoxScope.() -> Unit
+) {
+    val state = rememberPullToRefreshState()
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = onRefresh,
+        state = state,
+        modifier = modifier,
+        indicator = {
+            PullToRefreshDefaults.Indicator(
+                state = state,
+                isRefreshing = isRefreshing,
+                modifier = Modifier.align(Alignment.TopCenter),
+                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = .96f),
+                color = MaterialTheme.colorScheme.primary
+            )
+        },
+        content = content
+    )
 }
 
 @Composable
@@ -185,7 +226,7 @@ fun GoalProgressCard(goal: String, percent: Int, remaining: String, progress: Fl
                 if (showPercent) Text("$percent%", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
             }
             Text(goal, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            LinearProgressIndicator(progress = { progress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().height(5.dp).clip(CircleShape), color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.surfaceVariant)
+            LinearProgressIndicator(progress = { progress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().height(8.dp).clip(CircleShape), color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.surfaceVariant)
             Text(remaining, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
@@ -274,17 +315,17 @@ fun GlassBottomBar(selectedRoute: String?, onSelect: (Destination) -> Unit, modi
     val borderColor = MaterialTheme.colorScheme.secondary
     val shape = RoundedCornerShape(26.dp)
     Surface(
-        modifier = modifier.fillMaxWidth().then(
+        modifier = modifier.fillMaxWidth().shadow(10.dp, shape, clip = false).clip(shape).then(
             if (hazeState != null) Modifier.hazeEffect(state = hazeState) {
                 blurRadius = 18.dp
-                backgroundColor = surfaceColor.copy(alpha = .72f)
-                alpha = 1f
+                backgroundColor = surfaceColor.copy(alpha = .62f)
+                alpha = .96f
             } else Modifier
         ),
         shape = shape,
-        color = surfaceColor.copy(alpha = .78f),
-        border = BorderStroke(1.dp, borderColor.copy(alpha = .22f)),
-        shadowElevation = 8.dp,
+        color = surfaceColor.copy(alpha = .72f),
+        border = BorderStroke(1.dp, borderColor.copy(alpha = .24f)),
+        shadowElevation = 0.dp,
         tonalElevation = 0.dp
     ) {
             BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp)) {
@@ -304,7 +345,7 @@ fun GlassBottomBar(selectedRoute: String?, onSelect: (Destination) -> Unit, modi
                             verticalArrangement = Arrangement.Center
                         ) {
                             Box(Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 28.dp), contentAlignment = Alignment.Center) {
-                                Icon(destination.icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+                                Icon(destination.icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
                             }
                             Text(destination.label, color = tint, style = MaterialTheme.typography.labelSmall, maxLines = 1)
                         }

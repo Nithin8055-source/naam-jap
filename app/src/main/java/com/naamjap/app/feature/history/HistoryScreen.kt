@@ -61,18 +61,30 @@ class HistoryViewModel @Inject constructor(
     private val _state = MutableStateFlow(HistoryUiState())
     val state: StateFlow<HistoryUiState> = _state
     init { refresh() }
-    fun refresh() { viewModelScope.launch {
-        _state.value = _state.value.copy(isLoading = true, error = null)
-        try {
-            repository.refresh(java.time.ZoneId.systemDefault().id)
-            _state.value = _state.value.copy(records = loadAllHistory(), isLoading = false, error = null)
-        } catch (cancelled: kotlinx.coroutines.CancellationException) {
-            _state.value = _state.value.copy(isLoading = false)
-            throw cancelled
-        } catch (error: Exception) {
-            _state.value = _state.value.copy(isLoading = false, error = safeSupabaseError(error, networkStatus.hasValidatedInternet()))
+    fun refresh() {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(isLoading = true, error = null)
+            try {
+                repository.refresh(java.time.ZoneId.systemDefault().id)
+                _state.value = _state.value.copy(
+                    records = loadAllHistory(),
+                    isLoading = false,
+                    error = null
+                )
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                _state.value = _state.value.copy(isLoading = false)
+                throw cancelled
+            } catch (error: Exception) {
+                _state.value = _state.value.copy(
+                    isLoading = false,
+                    error = safeSupabaseError(
+                        error,
+                        networkStatus.hasValidatedInternet()
+                    )
+                )
+            }
         }
-    } } }
+    }
 
     fun deleteSession(id: String, password: String) = deleteWithPassword(id, password) { repository.deleteSession(id) }
     fun deleteManualRecord(id: String, password: String) = deleteWithPassword(id, password) { repository.deleteManualRecord(id) }

@@ -172,7 +172,8 @@ class SupabasePracticeRepository @Inject constructor(
                 durationSeconds = row.sessionId?.let { durations[it]?.seconds },
                 note = row.notes,
                 isSession = row.sessionId != null,
-                sortAt = row.createdAt.toInstantOrUtc()
+                sortAt = row.createdAt.toInstantOrUtc(),
+                sessionId = row.sessionId
             )
         }
             .sortedByDescending(PracticeHistoryItem::sortAt)
@@ -195,8 +196,17 @@ class SupabasePracticeRepository @Inject constructor(
 
     override suspend fun setDefaultNaamType(id: String): NaamType = actionMutex.withLock {
         val row = traced("rpc.set_default_naam_type") { client().postgrest.rpc("set_default_naam_type", NaamIdArgs(id)).decodeList<NaamTypeRow>().single() }
-        refresh(ZoneId.systemDefault().id)
-        row.toDomain()
+        refreshAfterWrite()
+        val selected = row.toDomain()
+        val currentNames = _state.value.naamTypes
+        val hasSelectedName = currentNames.any { it.id == selected.id }
+        _state.value = _state.value.copy(
+            naamTypes = currentNames.map { it.copy(isDefault = it.id == selected.id) } +
+                if (hasSelectedName) emptyList() else listOf(selected),
+            message = "Default Naam updated.",
+            error = null
+        )
+        selected
     }
 
     override suspend fun startSession(naamId: String): ActiveJapSession = actionMutex.withLock {
@@ -267,7 +277,8 @@ class SupabasePracticeRepository @Inject constructor(
     override suspend fun deleteSession(sessionId: String) = actionMutex.withLock {
         setSaving()
         try {
-            traced("rpc.delete_jap_session") {
+            val safeSessionId = runCatching { UUID.fromString(sessionId).toString() }.getOrElse { "invalid-session-id" }
+            traced("rpc.delete_jap_session", diagnosticContext = "session_id=$safeSessionId") {
                 client().postgrest.rpc("delete_jap_session", SessionIdArgs(sessionId))
             }
             refreshAfterWrite()
@@ -340,11 +351,16 @@ class SupabasePracticeRepository @Inject constructor(
         require(targetCount in 1..1_000_000_000) { "Daily goal is out of range." }
         setSaving()
         try {
-            traced("rpc.save_daily_goal") {
+            val savedGoal = traced("rpc.save_daily_goal") {
                 client().postgrest.rpc("save_daily_goal", DailyGoalArgs(targetCount)).decodeList<DailyGoalRow>().single()
             }
             refreshAfterWrite()
-            _state.value = _state.value.copy(message = "Daily goal saved to your account.", error = null)
+            _state.value = _state.value.copy(
+                dashboard = _state.value.dashboard.copy(dailyGoal = savedGoal.targetCount),
+                isSaving = false,
+                message = "Daily goal saved to your account.",
+                error = null
+            )
         } catch (cancelled: CancellationException) {
             _state.value = _state.value.copy(isSaving = false)
             throw cancelled
@@ -371,12 +387,16 @@ class SupabasePracticeRepository @Inject constructor(
         }
     }
 
-    private suspend fun <T> traced(operation: String, request: suspend () -> T): T = try {
+    private suspend fun <T> traced(
+        operation: String,
+        diagnosticContext: String? = null,
+        request: suspend () -> T
+    ): T = try {
         request()
     } catch (cancelled: CancellationException) {
         throw cancelled
     } catch (error: Exception) {
-        logSafeSupabaseFailure(operation, error)
+        logSafeSupabaseFailure(operation, error, diagnosticContext)
         _state.value = _state.value.copy(
             error = safeSupabaseError(error, networkStatus.hasValidatedInternet()),
             canRetry = operation.startsWith("rpc.get_") || operation.contains(".select")

@@ -27,7 +27,8 @@ data class PracticeHistoryItem(
     val durationSeconds: Long?,
     val note: String?,
     val isSession: Boolean,
-    val sortAt: Instant
+    val sortAt: Instant,
+    val sessionId: String? = null
 )
 
 data class PracticeDashboard(

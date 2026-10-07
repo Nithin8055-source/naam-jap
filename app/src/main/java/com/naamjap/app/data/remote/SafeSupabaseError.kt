@@ -11,18 +11,26 @@ import kotlinx.serialization.SerializationException
 private const val DATA_ACCESS_TAG = "NaamJapData"
 
 /** Logs only server diagnostics that are useful for support; never logs request headers or credentials. */
-fun logSafeSupabaseFailure(operation: String, error: Throwable) {
+fun logSafeSupabaseFailure(operation: String, error: Throwable, diagnosticContext: String? = null) {
     val causes = generateSequence(error) { it.cause }.take(8).toList()
     val postgrest = causes.filterIsInstance<PostgrestRestException>().firstOrNull()
     val safeMessage = postgrest?.let { it.message?.toSafeDiagnosticMessage(it.code) }
+    val safeDetails = postgrest?.let { it.details?.toSafeDiagnosticMessage(it.code) }
+    val safeHint = postgrest?.let { it.hint?.toSafeDiagnosticMessage(it.code) }
     val exceptionType = causes.firstOrNull { it !is DatabaseOperationException }?.javaClass?.simpleName ?: "UnknownException"
     val status = postgrest?.response?.status?.value
     val code = postgrest?.code
-    Log.w(DATA_ACCESS_TAG, "operation=$operation exception=$exceptionType httpStatus=${status ?: "none"} postgrestCode=${code ?: "none"} serverMessage=${safeMessage ?: "none"}")
+    val context = diagnosticContext?.takeIf { it.matches(Regex("session_id=[0-9a-fA-F-]{36}")) }
+    Log.w(
+        DATA_ACCESS_TAG,
+        "operation=$operation${context?.let { " $it" }.orEmpty()} exception=$exceptionType " +
+            "httpStatus=${status ?: "none"} postgrestCode=${code ?: "none"} " +
+            "serverMessage=${safeMessage ?: "none"} serverDetails=${safeDetails ?: "none"} serverHint=${safeHint ?: "none"}"
+    )
 }
 
 private fun String.toSafeDiagnosticMessage(code: String?): String {
-    if (code !in setOf("42P01", "42703", "42883", "42501", "PGRST202", "PGRST204", "PGRST205", "PGRST116", "28000", "28P01")) {
+    if (code !in setOf("42P01", "42703", "42883", "42501", "PGRST202", "PGRST204", "PGRST205", "PGRST116", "28000", "28P01", "P0001", "P0002", "22023", "23503", "23505", "23514")) {
         return "[server message withheld for privacy]"
     }
     return replace(
@@ -64,16 +72,42 @@ fun safeSupabaseError(error: Throwable, hasValidatedInternet: Boolean): String {
 
     val postgrestError = causes.filterIsInstance<PostgrestRestException>().firstOrNull()
     val status = postgrestError?.response?.status?.value
+    val code = postgrestError?.code
     when (postgrestError?.code) {
         "42P01", "42703", "42883", "PGRST202", "PGRST204", "PGRST205" ->
             return "The app's database API is out of date. Contact support or update the Supabase staging schema."
         "42501" -> return "The database denied this operation. Check the authenticated account's table permissions and row policy."
         "PGRST116" -> return "The requested database row was missing or ambiguous. Refresh and try again."
     }
+    if (postgrestError != null && code in setOf("P0001", "P0002", "22023", "23503", "23505", "23514", "28000")) {
+        val message = postgrestError.message.toSafeDiagnosticMessage(code)
+        val details = postgrestError.details?.toSafeDiagnosticMessage(code)
+        val hint = postgrestError.hint?.toSafeDiagnosticMessage(code)
+        val diagnostic = listOfNotNull(
+            message.takeUnless { it == "[server message withheld for privacy]" },
+            details?.takeUnless { it == "[server message withheld for privacy]" }?.let { "details: $it" },
+            hint?.takeUnless { it == "[server message withheld for privacy]" }?.let { "hint: $it" }
+        ).joinToString("; ")
+        if (diagnostic.isNotBlank()) {
+            val statusLabel = status?.let { "HTTP $it, " }.orEmpty()
+            return "Database request failed ($statusLabel$code): $diagnostic"
+        }
+    }
     if (status == 401) return "Your session is no longer valid. Sign in again."
     if (status == 403) return "Your account doesn't have permission to access this data."
     if (status != null && status in 400..499) return "Supabase rejected the database request. Check the account data and try again."
-    if (status != null && status in 500..599) return "Supabase encountered a server error. Try again later."
+    if (status != null && status in 500..599) {
+        val message = postgrestError?.message?.toSafeDiagnosticMessage(code)
+        val details = postgrestError?.details?.toSafeDiagnosticMessage(code)
+        val hint = postgrestError?.hint?.toSafeDiagnosticMessage(code)
+        val diagnostic = listOfNotNull(
+            message?.takeUnless { it == "[server message withheld for privacy]" },
+            details?.takeUnless { it == "[server message withheld for privacy]" }?.let { "details: $it" },
+            hint?.takeUnless { it == "[server message withheld for privacy]" }?.let { "hint: $it" }
+        ).joinToString("; ")
+        if (diagnostic.isNotBlank()) return "Database request failed (HTTP $status${code?.let { ", $it" }.orEmpty()}): $diagnostic"
+        return "Supabase encountered a server error (HTTP $status${code?.let { ", $it" }.orEmpty()}). Try again later."
+    }
     if (names.any { it.contains("Unauthorized", ignoreCase = true) }) {
         return "Authentication failed or your session expired. Sign in again."
     }

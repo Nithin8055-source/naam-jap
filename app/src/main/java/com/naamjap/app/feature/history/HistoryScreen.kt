@@ -39,6 +39,7 @@ import java.time.format.DateTimeFormatter
 import com.naamjap.app.ui.components.*
 import com.naamjap.app.data.remote.NetworkStatus
 import com.naamjap.app.data.remote.safeSupabaseError
+import com.naamjap.app.domain.repository.PracticeHistoryItem
 import com.naamjap.app.ui.theme.JapSpacing
 import com.naamjap.app.ui.theme.NaamJapTheme
 import androidx.compose.ui.tooling.preview.Preview
@@ -86,7 +87,14 @@ class HistoryViewModel @Inject constructor(
         }
     }
 
-    fun deleteSession(id: String, password: String) = deleteWithPassword(id, password) { repository.deleteSession(id) }
+    fun deleteSession(item: PracticeHistoryItem, password: String) {
+        val sessionId = item.sessionId
+        if (sessionId == null) {
+            _state.value = _state.value.copy(deletionError = "This history item is missing its session link. Refresh and try again.")
+            return
+        }
+        deleteWithPassword(item.id, password) { repository.deleteSession(sessionId) }
+    }
     fun deleteManualRecord(id: String, password: String) = deleteWithPassword(id, password) { repository.deleteManualRecord(id) }
     fun clearDeletionError() { _state.value = _state.value.copy(deletionError = null) }
 
@@ -95,14 +103,21 @@ class HistoryViewModel @Inject constructor(
         try {
             auth.reauthenticate(password)
             operation()
-            repository.refresh(java.time.ZoneId.systemDefault().id)
             _state.value = _state.value.copy(
-                records = loadAllHistory(),
+                records = _state.value.records.filterNot { it.id == id },
                 deletingId = null,
                 deletionError = null,
                 lastDeletedId = id,
                 error = null
             )
+            try {
+                _state.value = _state.value.copy(records = loadAllHistory())
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (refreshError: Exception) {
+                // The RPC already confirmed deletion; report a history refresh issue separately.
+                _state.value = _state.value.copy(error = safeSupabaseError(refreshError, networkStatus.hasValidatedInternet()))
+            }
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             _state.value = _state.value.copy(deletingId = null)
             throw cancelled
@@ -280,7 +295,7 @@ fun HistoryScreen(viewModel: HistoryViewModel = hiltViewModel()) {
                     onClick = {
                         val password = deletePassword
                         deletePassword = ""
-                        if (target.isSession) viewModel.deleteSession(target.id, password)
+                        if (target.isSession) viewModel.deleteSession(target, password)
                         else viewModel.deleteManualRecord(target.id, password)
                     }
                 ) { Text("Delete", color = MaterialTheme.colorScheme.error) }

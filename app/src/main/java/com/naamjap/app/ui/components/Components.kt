@@ -67,9 +67,15 @@ fun PremiumScaffold(
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = { NaamJapTopAppBar() },
-        bottomBar = bottomBar,
         snackbarHost = { SnackbarHost(snackbarHostState) }
-    ) { innerPadding -> content(innerPadding) }
+    ) { innerPadding ->
+        // Keep the destination behind the floating glass pill so Haze samples page content,
+        // and no Scaffold bottom-bar slot paints a solid rectangle around the pill.
+        Box(Modifier.fillMaxSize()) {
+            content(innerPadding)
+            Box(Modifier.align(Alignment.BottomCenter)) { bottomBar() }
+        }
+    }
 }
 
 @Composable

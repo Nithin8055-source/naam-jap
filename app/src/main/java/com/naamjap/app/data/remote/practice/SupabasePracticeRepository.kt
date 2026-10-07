@@ -298,7 +298,9 @@ class SupabasePracticeRepository @Inject constructor(
         if (sessionIds.isEmpty()) return emptyMap()
         return traced("rpc.get_jap_session_durations") {
             client().postgrest.rpc("get_jap_session_durations", SessionIdsArgs(sessionIds))
-                .decodeList<SessionDurationRow>().associate { it.sessionId to SessionDuration(it.durationSeconds, it.isPaused) }
+                .decodeList<SessionDurationRow>().associate {
+                    it.sessionId to SessionDuration(it.durationSeconds, it.isPaused == true)
+                }
         }
     }
 
@@ -398,7 +400,7 @@ class SupabasePracticeRepository @Inject constructor(
     @Serializable private data class SessionDurationRow(
         @SerialName("session_id") val sessionId: String,
         @SerialName("duration_seconds") val durationSeconds: Long,
-        @SerialName("is_paused") val isPaused: Boolean
+        @SerialName("is_paused") val isPaused: Boolean?
     )
     private data class SessionDuration(val seconds: Long, val paused: Boolean)
 

@@ -41,10 +41,22 @@ jobs:
           java -version
           ./gradlew --version
 
+          report_first_compiler_diagnostic() {
+            local log_file="$1"
+            local diagnostic
+            diagnostic=$(grep -m1 -E '(^|[[:space:]])e:|error:|Unresolved reference|Cannot access|Type mismatch|NonExistentClass' "$log_file" || true)
+            if [[ -n "$diagnostic" ]]; then
+              echo "::error title=Kotlin compiler diagnostic::$diagnostic"
+            fi
+          }
+
           set +e
           ./gradlew :app:kspDebugKotlin --stacktrace --info 2>&1 | tee ksp-debug.log
           ksp_exit=${PIPESTATUS[0]}
           set -e
+          if [[ "$ksp_exit" -ne 0 ]]; then
+            report_first_compiler_diagnostic ksp-debug.log
+          fi
 
           if [[ "$ksp_exit" -ne 0 ]]; then
             if grep -Fq "Compilation error. See log for more details" ksp-debug.log \
@@ -54,6 +66,28 @@ jobs:
               ./gradlew :app:compileDebugKotlin --stacktrace --info 2>&1 | tee compile-debug.log
               compile_exit=${PIPESTATUS[0]}
               set -e
+              report_first_compiler_diagnostic compile-debug.log
+
+              if [[ "$compile_exit" -ne 0 ]] \
+                && grep -Fq "Compilation error. See log for more details" compile-debug.log \
+                && ! grep -Eiq '(^|[[:space:]])e:|error:|Unresolved reference|Cannot access|Type mismatch|NonExistentClass' compile-debug.log; then
+                echo "KSP blocked the compile task without a source diagnostic; running a diagnostic Kotlin compile with only the failing KSP task excluded."
+                set +e
+                ./gradlew :app:compileDebugKotlin --stacktrace --info -x :app:kspDebugKotlin 2>&1 | tee compile-source-debug.log
+                source_compile_exit=${PIPESTATUS[0]}
+                set -e
+                report_first_compiler_diagnostic compile-source-debug.log
+                echo "Source-only diagnostic compile exit code: $source_compile_exit"
+              fi
+
+              echo "KSP diagnostic exit code: $ksp_exit; Kotlin compile diagnostic exit code: ${compile_exit:-not-run}"
+              if [[ -f compile-source-debug.log ]]; then
+                echo "Compiler diagnostics from the source-only compile attempt:"
+                grep -nE '(^|[[:space:]])e:|error:|Unresolved reference|Cannot access|Type mismatch|NonExistentClass' compile-source-debug.log || true
+              elif [[ -f compile-debug.log ]]; then
+                echo "Compiler diagnostics from the Kotlin compile attempt:"
+                grep -nE '(^|[[:space:]])e:|error:|Unresolved reference|Cannot access|Type mismatch|NonExistentClass' compile-debug.log || true
+              fi
             fi
             exit "$ksp_exit"
           fi

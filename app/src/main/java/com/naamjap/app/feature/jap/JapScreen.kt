@@ -3,6 +3,7 @@ package com.naamjap.app.feature.jap
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.rememberScrollState
@@ -58,7 +59,7 @@ data class JapUiState(val title: String = "Naam Jap", val count: Int = 0)
 @HiltViewModel
 class JapViewModel @Inject constructor(private val repository: com.naamjap.app.domain.repository.PracticeRepository) : ViewModel() {
     val data = repository.state
-    private data class OptimisticCount(val sessionId: String, val target: Long)
+    data class OptimisticCount(val sessionId: String, val target: Long)
     private data class QueuedIncrement(val sessionId: String, val operationId: String, val target: Long)
     private val _optimisticCount = MutableStateFlow<OptimisticCount?>(null)
     val optimisticCount = _optimisticCount.asStateFlow()

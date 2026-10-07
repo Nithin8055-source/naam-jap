@@ -38,64 +38,42 @@ jobs:
       - name: Build and test
         shell: bash
         run: |
-          java -version
-          ./gradlew --version
+          set +e
+          java -version || exit $?
+          ./gradlew --version || exit $?
 
-          report_first_compiler_diagnostic() {
+          run_gradle_task() {
             local log_file="$1"
-            local diagnostic
-            diagnostic=$(grep -m1 -E '(^|[[:space:]])e:|error:|Unresolved reference|Cannot access|Type mismatch|NonExistentClass' "$log_file" || true)
-            if [[ -n "$diagnostic" ]]; then
-              echo "::error title=Kotlin compiler diagnostic::$diagnostic"
+            shift
+            echo "Running: $*"
+            "$@" --console=plain --stacktrace --info 2>&1 | tee "$log_file"
+            local gradle_exit=${PIPESTATUS[0]}
+            if [[ "$gradle_exit" -ne 0 ]]; then
+              echo "Gradle task failed with exit code $gradle_exit. Reprinting complete, unfiltered output: $log_file"
+              cat "$log_file"
+              return "$gradle_exit"
             fi
+            return 0
           }
 
-          set +e
-          ./gradlew :app:kspDebugKotlin --stacktrace --info 2>&1 | tee ksp-debug.log
-          ksp_exit=${PIPESTATUS[0]}
-          set -e
-          if [[ "$ksp_exit" -ne 0 ]]; then
-            report_first_compiler_diagnostic ksp-debug.log
-          fi
-
-          if [[ "$ksp_exit" -ne 0 ]]; then
-            if grep -Fq "Compilation error. See log for more details" ksp-debug.log \
-              && ! grep -Eiq '(^|[[:space:]])e:|error:|Unresolved reference|Cannot access|Type mismatch|NonExistentClass' ksp-debug.log; then
-              echo "KSP emitted only its generic compilation failure; running Kotlin compilation for additional diagnostics."
-              set +e
-              ./gradlew :app:compileDebugKotlin --stacktrace --info 2>&1 | tee compile-debug.log
-              compile_exit=${PIPESTATUS[0]}
-              set -e
-              report_first_compiler_diagnostic compile-debug.log
-
-              if [[ "$compile_exit" -ne 0 ]] \
-                && grep -Fq "Compilation error. See log for more details" compile-debug.log \
-                && ! grep -Eiq '(^|[[:space:]])e:|error:|Unresolved reference|Cannot access|Type mismatch|NonExistentClass' compile-debug.log; then
-                echo "KSP blocked the compile task without a source diagnostic; running a diagnostic Kotlin compile with only the failing KSP task excluded."
-                set +e
-                ./gradlew :app:compileDebugKotlin --stacktrace --info -x :app:kspDebugKotlin 2>&1 | tee compile-source-debug.log
-                source_compile_exit=${PIPESTATUS[0]}
-                set -e
-                report_first_compiler_diagnostic compile-source-debug.log
-                echo "Source-only diagnostic compile exit code: $source_compile_exit"
-              fi
-
-              echo "KSP diagnostic exit code: $ksp_exit; Kotlin compile diagnostic exit code: ${compile_exit:-not-run}"
-              if [[ -f compile-source-debug.log ]]; then
-                echo "Compiler diagnostics from the source-only compile attempt:"
-                grep -nE '(^|[[:space:]])e:|error:|Unresolved reference|Cannot access|Type mismatch|NonExistentClass' compile-source-debug.log || true
-              elif [[ -f compile-debug.log ]]; then
-                echo "Compiler diagnostics from the Kotlin compile attempt:"
-                grep -nE '(^|[[:space:]])e:|error:|Unresolved reference|Cannot access|Type mismatch|NonExistentClass' compile-debug.log || true
-              fi
-            fi
-            exit "$ksp_exit"
-          fi
-
-          ./gradlew assembleDebug testDebugUnitTest lintDebug --info --stacktrace
+          run_gradle_task ksp-debug.log ./gradlew :app:kspDebugKotlin || exit $?
+          run_gradle_task compile-debug.log ./gradlew :app:compileDebugKotlin || exit $?
+          run_gradle_task build-test-lint.log ./gradlew assembleDebug testDebugUnitTest lintDebug || exit $?
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+
+      - name: Upload Gradle diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: naam-jap-gradle-diagnostics
+          path: |
+            ksp-debug.log
+            compile-debug.log
+            build-test-lint.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4

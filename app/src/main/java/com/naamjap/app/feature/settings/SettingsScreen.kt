@@ -401,13 +401,13 @@ fun SettingsScreen(
                                 SettingRow(
                                     icon = if (naam.isDefault) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
                                     title = naam.name,
-                                    value = if (naam.isDefault) "Default · protected" else "Personal",
+                                    value = if (naam.isDefault) "Default · used for new sessions" else "Personal",
                                     onClick = { if (!naam.isDefault && !state.isSaving) viewModel.setDefaultNaam(naam.id) },
                                     enabled = !state.isSaving,
                                     showChevron = false,
                                     modifier = Modifier.weight(1f)
                                 )
-                                if (!naam.isDefault) {
+                                if (practice.naamTypes.size > 1) {
                                     IconButton(onClick = { deleteNaamTarget = naam; naamDeletePassword = "" }, enabled = !state.isSaving) {
                                         Icon(Icons.Default.DeleteOutline, contentDescription = "Delete ${naam.name}", tint = MaterialTheme.colorScheme.error)
                                     }
@@ -524,7 +524,13 @@ fun SettingsScreen(
             title = { Text("Delete ${naam.name}?") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(JapSpacing.sm)) {
-                    Text("Enter your password to confirm. Saved practice using this Naam must be removed first.")
+                    Text(
+                        if (naam.isDefault) {
+                            "Enter your password to confirm. Another Naam will become the default first. Saved practice using this Naam must be removed before deletion."
+                        } else {
+                            "Enter your password to confirm. Saved practice using this Naam must be removed before deletion."
+                        }
+                    )
                     OutlinedTextField(
                         value = naamDeletePassword,
                         onValueChange = { naamDeletePassword = it },

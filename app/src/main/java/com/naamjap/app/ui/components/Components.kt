@@ -10,6 +10,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
@@ -26,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -55,8 +58,8 @@ import java.text.NumberFormat
 fun formatCount(count: Long): String = NumberFormat.getIntegerInstance().format(count)
 
 @Composable
-fun PremiumScaffold(
-    bottomBar: @Composable () -> Unit,
+fun PremiumNavigationOverlay(
+    bottomBar: @Composable BoxScope.() -> Unit,
     feedbackMessage: String? = null,
     onFeedbackRetry: (() -> Unit)? = null,
     content: @Composable (PaddingValues) -> Unit
@@ -71,25 +74,33 @@ fun PremiumScaffold(
         )
         if (result == SnackbarResult.ActionPerformed) currentRetry.value?.invoke()
     }
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = { NaamJapTopAppBar() },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        contentWindowInsets = WindowInsets(0, 0, 0, 0)
-    ) { innerPadding ->
-        // Keep the destination behind the floating glass pill so Haze samples page content,
-        // and no Scaffold bottom-bar slot paints a solid rectangle around the pill.
-        Box(Modifier.fillMaxSize()) {
-            content(innerPadding)
-            Box(Modifier.align(Alignment.BottomCenter)) { bottomBar() }
-        }
+    val density = LocalDensity.current
+    val topInset = with(density) { WindowInsets.statusBars.getTop(this).toDp() }
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        // A root overlay keeps the page continuous behind the floating pill. There is no
+        // Scaffold bottomBar slot or full-width navigation surface.
+        content(PaddingValues(top = topInset + TopAppBarContentHeight))
+        NaamJapTopAppBar()
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = navigationContentBottomInset())
+        )
+        bottomBar()
     }
 }
 
-/** Space reserved in the destination viewport so the last scroll item can clear the floating pill. */
+private val TopAppBarContentHeight = 56.dp
+private val NavigationPillItemHeight = 52.dp
+private val NavigationPillVerticalPadding = 4.dp
+private val NavigationPillBottomMargin = 8.dp
+private val NavigationPillSafetyGap = 12.dp
+
+/** Space reserved in the destination viewport so its last item clears the overlay pill. */
 @Composable
 fun navigationContentBottomInset(): Dp = with(LocalDensity.current) {
-    WindowInsets.navigationBars.getBottom(this).toDp() + 80.dp
+    WindowInsets.navigationBars.getBottom(this).toDp() +
+        NavigationPillItemHeight + NavigationPillVerticalPadding * 2 +
+        NavigationPillBottomMargin + NavigationPillSafetyGap
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -315,7 +326,10 @@ fun GlassBottomBar(selectedRoute: String?, onSelect: (Destination) -> Unit, modi
     val borderColor = MaterialTheme.colorScheme.secondary
     val shape = RoundedCornerShape(26.dp)
     Surface(
-        modifier = modifier.fillMaxWidth().shadow(10.dp, shape, clip = false).clip(shape).then(
+        modifier = modifier.fillMaxWidth().shadow(10.dp, shape, clip = false).graphicsLayer {
+            this.shape = shape
+            clip = true
+        }.then(
             if (hazeState != null) Modifier.hazeEffect(state = hazeState) {
                 blurRadius = 18.dp
                 backgroundColor = surfaceColor.copy(alpha = .62f)
@@ -345,7 +359,7 @@ fun GlassBottomBar(selectedRoute: String?, onSelect: (Destination) -> Unit, modi
                             verticalArrangement = Arrangement.Center
                         ) {
                             Box(Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 28.dp), contentAlignment = Alignment.Center) {
-                                Icon(destination.icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+                                Icon(destination.icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
                             }
                             Text(destination.label, color = tint, style = MaterialTheme.typography.labelSmall, maxLines = 1)
                         }

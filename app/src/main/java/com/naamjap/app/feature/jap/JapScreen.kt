@@ -210,12 +210,6 @@ fun JapScreen(viewModel: JapViewModel = hiltViewModel()) {
                 Image(painterResource(R.drawable.ic_sacred_halo), null, Modifier.fillMaxSize().alpha(.13f), contentScale = ContentScale.Fit)
                 JapCircularProgressIndicator(progress = 0f, modifier = Modifier.size(272.dp), strokeWidth = 5.dp) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Image(
-                            painter = painterResource(R.drawable.mala_beads),
-                            contentDescription = "Prayer beads decoration; this is a numerical counter",
-                            modifier = Modifier.size(48.dp).clip(CircleShape),
-                            contentScale = ContentScale.Crop
-                        )
                         AnimatedContent(targetState = formattedCount, label = "session count") {
                             Text(
                                 it,
@@ -252,7 +246,12 @@ fun JapScreen(viewModel: JapViewModel = hiltViewModel()) {
                 Column(Modifier.padding(JapSpacing.md)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(JapSpacing.md)) {
                         Box(Modifier.size(48.dp).background(MaterialTheme.colorScheme.primary.copy(alpha = .12f), CircleShape), contentAlignment = Alignment.Center) {
-                            OmSymbol(Modifier.size(26.dp), null)
+                            Image(
+                                painter = painterResource(R.drawable.mala_beads),
+                                contentDescription = null,
+                                modifier = Modifier.size(48.dp).clip(CircleShape),
+                                contentScale = ContentScale.Crop
+                            )
                         }
                         Column {
                             Text(active?.naamName ?: "Start a session", style = MaterialTheme.typography.titleMedium)

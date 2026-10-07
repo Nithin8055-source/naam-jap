@@ -229,7 +229,7 @@ class SupabasePracticeRepository @Inject constructor(
                 }.decodeList<NaamTypeDeleteCheckRow>().singleOrNull()
             } ?: throw IllegalArgumentException("This Naam type was not found in your account. Refresh and try again.")
 
-            require(selected.isDefault == false) { "This Naam type is protected because its default status could not be cleared." }
+            require(selected.isDefault != null) { "This Naam type's default status could not be verified." }
 
             val sessionReferences = traced("naam_type.delete_session_references") {
                 client().from("jap_sessions").select(columns = Columns.list("id")) {
@@ -245,6 +245,29 @@ class SupabasePracticeRepository @Inject constructor(
             }
             require(!sessionReferences && !recordReferences) {
                 "This Naam type is used by saved practice and cannot be deleted."
+            }
+
+            if (selected.isDefault) {
+                val replacement = traced("naam_type.delete_default_replacement") {
+                    client().from("naam_types").select(columns = Columns.list("id", "is_default")) {
+                        filter {
+                            eq("user_id", userId)
+                            neq("id", id)
+                            eq("is_default", false)
+                        }
+                        limit(count = 1)
+                    }.decodeList<NaamTypeDeleteCheckRow>().singleOrNull()
+                } ?: throw IllegalArgumentException("Add another Naam type before deleting the default.")
+
+                val newDefault = traced("rpc.set_default_naam_type_before_delete") {
+                    client().postgrest.rpc("set_default_naam_type", NaamIdArgs(replacement.id))
+                        .decodeList<NaamTypeRow>().single()
+                }.toDomain()
+                _state.value = _state.value.copy(
+                    naamTypes = _state.value.naamTypes.map { it.copy(isDefault = it.id == newDefault.id) },
+                    message = "Default Naam updated.",
+                    error = null
+                )
             }
 
             traced("naam_type.delete") {

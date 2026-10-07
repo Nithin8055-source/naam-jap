@@ -271,6 +271,9 @@ create table if not exists public.jap_session_events (
     constraint jap_session_events_session_sequence_unique unique (session_id, sequence_no)
 );
 
+-- Add the nullable ledger link before validating the session foreign keys.
+alter table public.jap_records add column if not exists session_id uuid;
+
 do $$
 declare
     v_table text;
@@ -340,7 +343,6 @@ create index if not exists jap_session_events_user_session_sequence_idx
 -- jap_records is the canonical count ledger. A session is copied there once
 -- at completion. session.count remains operational metadata, not a dashboard
 -- count source.
-alter table public.jap_records add column if not exists session_id uuid;
 create unique index if not exists jap_records_id_unique on public.jap_records(id);
 
 create unique index if not exists jap_records_session_id_unique

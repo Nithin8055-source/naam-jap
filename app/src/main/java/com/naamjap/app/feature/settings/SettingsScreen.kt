@@ -36,6 +36,7 @@ import com.naamjap.app.domain.repository.NaamType
 import com.naamjap.app.domain.repository.PracticeRepository
 import com.naamjap.app.ui.components.GlassSurface
 import com.naamjap.app.ui.components.PremiumPullToRefreshBox
+import com.naamjap.app.ui.components.navigationContentBottomInset
 import com.naamjap.app.ui.theme.JapSpacing
 import com.naamjap.app.ui.theme.NaamJapTheme
 import com.naamjap.app.ui.theme.ThemeChoice
@@ -243,7 +244,8 @@ fun SettingsScreen(
     ) {
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState())
-            .padding(start = JapSpacing.lg, top = JapSpacing.md, end = JapSpacing.lg),
+            .padding(start = JapSpacing.lg, top = JapSpacing.md, end = JapSpacing.lg)
+            .padding(bottom = navigationContentBottomInset()),
         verticalArrangement = Arrangement.spacedBy(JapSpacing.md)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(JapSpacing.sm)) {

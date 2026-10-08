@@ -8,7 +8,6 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
@@ -36,7 +35,6 @@ import com.naamjap.app.feature.settings.SettingsScreen
 import com.naamjap.app.feature.jap.ManualRecordScreen
 import com.naamjap.app.ui.components.GlassBottomBar
 import com.naamjap.app.ui.components.PremiumNavigationOverlay
-import com.naamjap.app.ui.components.navigationContentBottomInset
 import com.naamjap.app.ui.theme.ThemeChoice
 import com.naamjap.app.domain.model.AccountIdentity
 import com.naamjap.app.domain.repository.PracticeRepository
@@ -97,17 +95,17 @@ fun NaamJapApp(
     PremiumNavigationOverlay(
         feedbackMessage = practiceState.error,
         onFeedbackRetry = if (practiceState.canRetry) feedbackViewModel::retry else null,
-        bottomBar = {
-            GlassBottomBar(
-                selectedRoute = currentRoute?.takeIf { route -> Destination.primary.any { it.route == route } },
-                onSelect = ::navigateToPrimary,
-                modifier = Modifier.align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(horizontal = 16.dp)
-                    .padding(bottom = 8.dp)
-                    .widthIn(max = 480.dp),
-                hazeState = hazeState
-            )
+        floatingNavigation = {
+            if (isPrimaryRoute) {
+                GlassBottomBar(
+                    selectedRoute = currentRoute,
+                    onSelect = ::navigateToPrimary,
+                    modifier = Modifier.align(Alignment.BottomCenter)
+                        .navigationBarsPadding()
+                        .padding(bottom = 8.dp),
+                    hazeState = hazeState
+                )
+            }
         }
     ) { innerPadding ->
         var horizontalDrag by remember(currentRoute) { mutableFloatStateOf(0f) }
@@ -120,7 +118,6 @@ fun NaamJapApp(
             popExitTransition = { slideOutHorizontally(animationSpec = tween(380, easing = FastOutSlowInEasing)) { width -> width / 6 } + fadeOut(tween(220)) },
             modifier = Modifier
                 .padding(innerPadding)
-                .padding(bottom = navigationContentBottomInset())
                 .hazeSource(hazeState)
                 .imePadding()
                 .pointerInput(currentRoute, isPrimaryRoute) {

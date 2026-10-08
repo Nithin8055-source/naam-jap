@@ -33,6 +33,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
+import com.naamjap.app.ui.components.navigationContentBottomInset
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -170,6 +171,7 @@ class JapViewModel @Inject constructor(private val repository: com.naamjap.app.d
 @Composable
 fun JapScreen(viewModel: JapViewModel = hiltViewModel()) {
     val data by viewModel.data.collectAsStateWithLifecycle()
+    val defaultNaam = data.naamTypes.firstOrNull { it.isDefault } ?: data.naamTypes.firstOrNull()
     val isUserRefreshing by viewModel.isUserRefreshing.collectAsStateWithLifecycle()
     val active = data.activeSession
     val optimisticCount by viewModel.optimisticCount.collectAsStateWithLifecycle()
@@ -201,10 +203,12 @@ fun JapScreen(viewModel: JapViewModel = hiltViewModel()) {
         modifier = Modifier.fillMaxSize()
     ) {
     Box(Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = JapSpacing.xl, top = JapSpacing.lg, end = JapSpacing.xl), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+            .padding(start = JapSpacing.xl, top = JapSpacing.lg, end = JapSpacing.xl)
+            .padding(bottom = navigationContentBottomInset()), horizontalAlignment = Alignment.CenterHorizontally) {
             Text("Naam Jap", style = MaterialTheme.typography.headlineMedium)
             Spacer(Modifier.height(JapSpacing.xs))
-            Text(if (active == null) "Choose a naam and begin" else if (active.isPaused) "Paused" else "Session in progress", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(if (active == null) "Your default naam is ready" else if (active.isPaused) "Paused" else "Session in progress", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(JapSpacing.xxl))
             Box(Modifier.size(300.dp), contentAlignment = Alignment.Center) {
                 Image(painterResource(R.drawable.ic_sacred_halo), null, Modifier.fillMaxSize().alpha(.13f), contentScale = ContentScale.Fit)
@@ -223,7 +227,14 @@ fun JapScreen(viewModel: JapViewModel = hiltViewModel()) {
                             )
                         }
                         Text("Naam Jap", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(active?.naamName ?: "Select a naam below", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            active?.naamName ?: defaultNaam?.name ?: "Add a naam in Settings",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
                     }
                 }
             }
@@ -253,15 +264,22 @@ fun JapScreen(viewModel: JapViewModel = hiltViewModel()) {
                                 contentScale = ContentScale.Crop
                             )
                         }
-                        Column {
+                        Column(Modifier.weight(1f)) {
                             Text(active?.naamName ?: "Start a session", style = MaterialTheme.typography.titleMedium)
                             val shownCount = maxOf(active?.count ?: 0L, optimisticCount?.takeIf { it.sessionId == active?.id }?.target ?: 0L)
                             Text(if (active == null) "No active session" else "${formatElapsed(liveDurationSeconds)} · ${com.naamjap.app.ui.components.formatCount(shownCount)} Naam Jap", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            if (active == null) data.naamTypes.forEach { naam -> TextButton(onClick = { viewModel.start(naam.id) }) { Text("Start ${naam.name}") } }
-                            else TextButton(
-                                onClick = { viewModel.action(active.id, com.naamjap.app.domain.repository.SessionAction.FINISH) },
-                                enabled = !data.isSaving && (optimisticCount?.takeIf { it.sessionId == active.id }?.target ?: active.count) <= active.count
-                            ) { Text("Finish session") }
+                            if (active == null) {
+                                if (defaultNaam != null) {
+                                    TextButton(onClick = { viewModel.start(defaultNaam.id) }) {
+                                        Text("Start ${defaultNaam.name}", maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                    }
+                                }
+                            } else {
+                                TextButton(
+                                    onClick = { viewModel.action(active.id, com.naamjap.app.domain.repository.SessionAction.FINISH) },
+                                    enabled = !data.isSaving && (optimisticCount?.takeIf { it.sessionId == active.id }?.target ?: active.count) <= active.count
+                                ) { Text("Finish session") }
+                            }
                         }
                     }
                 }

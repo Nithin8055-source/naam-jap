@@ -3,7 +3,6 @@ package com.naamjap.app.ui.components
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -26,9 +25,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -59,7 +59,7 @@ fun formatCount(count: Long): String = NumberFormat.getIntegerInstance().format(
 
 @Composable
 fun PremiumNavigationOverlay(
-    bottomBar: @Composable BoxScope.() -> Unit,
+    floatingNavigation: @Composable BoxScope.() -> Unit,
     feedbackMessage: String? = null,
     onFeedbackRetry: (() -> Unit)? = null,
     content: @Composable (PaddingValues) -> Unit
@@ -77,19 +77,17 @@ fun PremiumNavigationOverlay(
     val density = LocalDensity.current
     val topInset = with(density) { WindowInsets.statusBars.getTop(this).toDp() }
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        // A root overlay keeps the page continuous behind the floating pill. There is no
-        // Scaffold bottomBar slot or full-width navigation surface.
-        content(PaddingValues(top = topInset + TopAppBarContentHeight))
-        NaamJapTopAppBar()
+        // The root keeps the page background continuous; the bounded floating pill is
+        // the only navigation surface and is drawn as a sibling above page content.
+        content(PaddingValues(top = topInset))
         SnackbarHost(
             hostState = snackbarHostState,
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = navigationContentBottomInset())
         )
-        bottomBar()
+        floatingNavigation()
     }
 }
 
-private val TopAppBarContentHeight = 56.dp
 private val NavigationPillItemHeight = 52.dp
 private val NavigationPillVerticalPadding = 4.dp
 private val NavigationPillBottomMargin = 8.dp
@@ -128,20 +126,6 @@ fun PremiumPullToRefreshBox(
         },
         content = content
     )
-}
-
-@Composable
-private fun NaamJapTopAppBar() {
-    Surface(color = MaterialTheme.colorScheme.background) {
-        Row(
-            Modifier.fillMaxWidth().statusBarsPadding().height(56.dp).padding(horizontal = JapSpacing.lg),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(JapSpacing.sm)
-        ) {
-            NaamJapLogo(Modifier.size(38.dp), contentDescription = "Naam Jap logo")
-            Text("Naam Jap", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
-        }
-    }
 }
 
 @Composable
@@ -325,23 +309,28 @@ fun GlassBottomBar(selectedRoute: String?, onSelect: (Destination) -> Unit, modi
     val surfaceColor = MaterialTheme.colorScheme.surface
     val borderColor = MaterialTheme.colorScheme.secondary
     val shape = RoundedCornerShape(26.dp)
-    Surface(
-        modifier = modifier.fillMaxWidth().shadow(10.dp, shape, clip = false).graphicsLayer {
-            this.shape = shape
-            clip = true
-        }.then(
-            if (hazeState != null) Modifier.hazeEffect(state = hazeState) {
-                blurRadius = 18.dp
-                backgroundColor = surfaceColor.copy(alpha = .62f)
-                alpha = .96f
-            } else Modifier
-        ),
-        shape = shape,
-        color = surfaceColor.copy(alpha = .72f),
-        border = BorderStroke(1.dp, borderColor.copy(alpha = .24f)),
-        shadowElevation = 0.dp,
-        tonalElevation = 0.dp
-    ) {
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        val pillWidth = (maxWidth - 32.dp).coerceAtLeast(0.dp).coerceAtMost(480.dp)
+        Surface(
+            modifier = Modifier
+                .width(pillWidth)
+                .align(Alignment.Center)
+                .shadow(10.dp, shape, clip = false)
+                .clip(shape)
+                .then(
+                    if (hazeState != null) Modifier.hazeEffect(state = hazeState) {
+                        blurRadius = 18.dp
+                        blurredEdgeTreatment = BlurredEdgeTreatment(shape)
+                        backgroundColor = Color.Transparent
+                        alpha = .96f
+                    } else Modifier
+                ),
+            shape = shape,
+            color = surfaceColor.copy(alpha = .72f),
+            border = BorderStroke(1.dp, borderColor.copy(alpha = .24f)),
+            shadowElevation = 0.dp,
+            tonalElevation = 0.dp
+        ) {
             BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp)) {
                 val itemWidth = maxWidth / Destination.primary.size
                 val selectedIndex = Destination.primary.indexOfFirst { it.route == selectedRoute }
@@ -366,6 +355,7 @@ fun GlassBottomBar(selectedRoute: String?, onSelect: (Destination) -> Unit, modi
                     }
                 }
             }
+        }
     }
 }
 

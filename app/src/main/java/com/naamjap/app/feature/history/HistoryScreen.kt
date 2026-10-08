@@ -1,6 +1,7 @@
 package com.naamjap.app.feature.history
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -17,6 +18,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
@@ -182,6 +186,14 @@ fun HistoryScreen(viewModel: HistoryViewModel = hiltViewModel()) {
     var selectedDate by rememberSaveable { mutableStateOf(today.toString()) }
     var activityFilter by rememberSaveable { mutableStateOf("Daily") }
     val displayedMonth = YearMonth.parse(month)
+    val dailyCounts = remember(state.records) {
+        state.records.groupBy { it.date }.mapValues { (_, records) ->
+            records.fold(0L) { total, record ->
+                val count = record.count.coerceAtLeast(0L)
+                if (Long.MAX_VALUE - total < count) Long.MAX_VALUE else total + count
+            }
+        }
+    }
     val formatter = remember { DateTimeFormatter.ofPattern("MMMM yyyy") }
     val leadingBlanks = displayedMonth.atDay(1).dayOfWeek.value - 1
     val days = (1..displayedMonth.lengthOfMonth()).toList()
@@ -201,7 +213,9 @@ fun HistoryScreen(viewModel: HistoryViewModel = hiltViewModel()) {
         onRefresh = { viewModel.refresh(userInitiated = true) },
         modifier = Modifier.fillMaxSize(),
     ) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = JapSpacing.lg, top = JapSpacing.md, end = JapSpacing.lg)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+        .padding(start = JapSpacing.lg, top = JapSpacing.md, end = JapSpacing.lg)
+        .padding(bottom = navigationContentBottomInset())) {
         Text("Your practice", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text("History", style = MaterialTheme.typography.headlineLarge)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(JapSpacing.xs)) {
@@ -239,11 +253,40 @@ fun HistoryScreen(viewModel: HistoryViewModel = hiltViewModel()) {
                             val date = if (day == 0) null else displayedMonth.atDay(day)
                             val isSelected = date?.toString() == selectedDate
                             val isToday = date == today
-                            val foreground = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+                            val dayCount = date?.let { dailyCounts[it] } ?: 0L
+                            val activityStyle = when {
+                                dayCount <= 0L -> null
+                                dayCount < 5_000L -> Color(0xFF8EAA7B) to .34f
+                                dayCount < 10_000L -> Color(0xFFE8D181) to .40f
+                                dayCount < 15_000L -> Color(0xFFEBC36E) to .46f
+                                dayCount < 20_000L -> Color(0xFFE5B15B) to .52f
+                                dayCount < 30_000L -> Color(0xFFD99A46) to .58f
+                                dayCount < 40_000L -> Color(0xFFCA8138) to .64f
+                                else -> Color(0xFFB96B2D) to .70f
+                            }
+                            val dayBackground = activityStyle?.let { (color, alpha) -> color.copy(alpha = alpha) }
+                                ?.compositeOver(MaterialTheme.colorScheme.surface)
+                                ?: MaterialTheme.colorScheme.surface
+                            val dayForeground = if (MaterialTheme.colorScheme.background.luminance() < .5f) {
+                                MaterialTheme.colorScheme.onSurface
+                            } else {
+                                Color(0xFF493416)
+                            }
                             Box(Modifier.weight(1f).height(48.dp), contentAlignment = Alignment.Center) {
-                                if (date != null) Box(Modifier.size(48.dp).clickable(role = Role.Button) { selectedDate = date.toString() }.semantics { contentDescription = date.format(DateTimeFormatter.ofPattern("MMMM d, yyyy")); selected = isSelected }, contentAlignment = Alignment.Center) {
-                                    Box(Modifier.size(36.dp).background(if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface, CircleShape))
-                                    Text(day.toString(), color = if (isSelected) foreground else MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelMedium)
+                                if (date != null) Box(Modifier.size(48.dp).clickable(role = Role.Button) { selectedDate = date.toString() }.semantics {
+                                    contentDescription = buildString {
+                                        append(date.format(DateTimeFormatter.ofPattern("MMMM d, yyyy")))
+                                        if (dayCount > 0L) append(": ${com.naamjap.app.ui.components.formatCount(dayCount)} Naam Jap")
+                                    }
+                                    selected = isSelected
+                                }, contentAlignment = Alignment.Center) {
+                                    Box(
+                                        Modifier
+                                            .size(36.dp)
+                                            .background(dayBackground, CircleShape)
+                                            .then(if (isSelected) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, CircleShape) else Modifier)
+                                    )
+                                    Text(day.toString(), color = dayForeground, style = MaterialTheme.typography.labelMedium)
                                     if (isToday && !isSelected) Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 6.dp).size(4.dp).background(MaterialTheme.colorScheme.primary, CircleShape))
                                 }
                             }

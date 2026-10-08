@@ -49,6 +49,7 @@ import com.naamjap.app.ui.components.StatCard
 import com.naamjap.app.ui.components.PremiumPullToRefreshBox
 import com.naamjap.app.ui.components.GoalProgressCard
 import com.naamjap.app.ui.components.formatCount
+import com.naamjap.app.ui.components.navigationContentBottomInset
 import com.naamjap.app.ui.theme.JapSpacing
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.time.LocalDate
@@ -142,7 +143,8 @@ fun InsightsScreen(viewModel: InsightsViewModel = hiltViewModel()) {
     Column(
         Modifier.fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(start = JapSpacing.lg, top = JapSpacing.md, end = JapSpacing.lg),
+            .padding(start = JapSpacing.lg, top = JapSpacing.md, end = JapSpacing.lg)
+            .padding(bottom = navigationContentBottomInset()),
         verticalArrangement = Arrangement.spacedBy(JapSpacing.md)
     ) {
         Text("Your journey", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)

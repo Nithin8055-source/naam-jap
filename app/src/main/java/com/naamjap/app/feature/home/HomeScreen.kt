@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
@@ -20,10 +21,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SelfImprovement
+import androidx.compose.material.icons.outlined.WbSunny
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
@@ -36,7 +39,7 @@ import com.naamjap.app.domain.repository.PracticeRepository
 import com.naamjap.app.ui.components.DailyCountDisplay
 import com.naamjap.app.ui.components.EmptyState
 import com.naamjap.app.ui.components.GlassSurface
-import com.naamjap.app.ui.components.GoalProgressCard
+import com.naamjap.app.ui.components.JapCircularProgressIndicator
 import com.naamjap.app.ui.components.PremiumCard
 import com.naamjap.app.ui.components.PremiumPullToRefreshBox
 import com.naamjap.app.ui.components.QuickActionItem
@@ -44,9 +47,11 @@ import com.naamjap.app.ui.components.SectionHeader
 import com.naamjap.app.ui.components.SessionRow
 import com.naamjap.app.ui.components.StatCard
 import com.naamjap.app.ui.components.formatCount
+import com.naamjap.app.ui.components.navigationContentBottomInset
 import com.naamjap.app.ui.theme.JapSpacing
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.time.ZoneId
+import java.time.LocalTime
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -109,7 +114,9 @@ fun HomeScreen(onNavigate: (String) -> Unit, displayName: String? = null, viewMo
         modifier = Modifier.fillMaxSize()
     ) {
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = JapSpacing.lg, vertical = JapSpacing.md),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+            .padding(horizontal = JapSpacing.lg, vertical = JapSpacing.md)
+            .padding(bottom = navigationContentBottomInset()),
         verticalArrangement = Arrangement.spacedBy(JapSpacing.md)
     ) {
         Row(
@@ -117,11 +124,23 @@ fun HomeScreen(onNavigate: (String) -> Unit, displayName: String? = null, viewMo
             verticalAlignment = Alignment.CenterVertically
         ) {
             val name = displayName?.takeIf(String::isNotBlank) ?: "there"
-            Text(
-                text = "Hi, $name",
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.headlineMedium
-            )
+            val greeting = when (LocalTime.now().hour) {
+                in 5..11 -> "Good morning"
+                in 12..16 -> "Good afternoon"
+                else -> "Good evening"
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(greeting, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(JapSpacing.xs)) {
+                    Text(name, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                    Icon(
+                        imageVector = Icons.Outlined.WbSunny,
+                        contentDescription = "Sun",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(19.dp)
+                    )
+                }
+            }
             IconButton(onClick = { onNavigate("settings") }) {
                 Icon(
                     imageVector = Icons.Outlined.Settings,
@@ -148,12 +167,40 @@ fun HomeScreen(onNavigate: (String) -> Unit, displayName: String? = null, viewMo
                     Spacer(Modifier.height(JapSpacing.sm))
                     val goal = data.dashboard.dailyGoal.coerceAtLeast(1)
                     val progress = (data.dashboard.todayCount.toDouble() / goal).coerceIn(0.0, 1.0)
-                    GoalProgressCard(
-                        "${data.dashboard.dailyGoal} repetitions",
-                        (progress * 100).toInt(),
-                        "${(goal - data.dashboard.todayCount).coerceAtLeast(0)} remaining",
-                        progress.toFloat()
-                    )
+                    PremiumCard(Modifier.fillMaxWidth()) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(JapSpacing.md),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(JapSpacing.md)
+                        ) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(JapSpacing.xs)) {
+                                Text("Daily goal", style = MaterialTheme.typography.titleMedium)
+                                Text("${formatCount(goal)} Naam Jap", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    "${formatCount(data.dashboard.todayCount)} / ${formatCount(goal)}",
+                                    style = MaterialTheme.typography.labelLarge
+                                )
+                                val remaining = (goal - data.dashboard.todayCount).coerceAtLeast(0)
+                                Text(
+                                    if (remaining == 0L) "Goal reached — keep going" else "${formatCount(remaining)} remaining",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            JapCircularProgressIndicator(
+                                progress = progress.toFloat(),
+                                modifier = Modifier.size(68.dp),
+                                strokeWidth = 6.dp
+                            ) {
+                                Text(
+                                    "${(progress * 100).toInt()}%",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    }
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(JapSpacing.xs)) {

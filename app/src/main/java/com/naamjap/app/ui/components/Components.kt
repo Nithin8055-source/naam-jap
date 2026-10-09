@@ -52,7 +52,9 @@ import com.naamjap.app.navigation.Destination
 import com.naamjap.app.R
 import com.naamjap.app.ui.theme.JapSpacing
 import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.hazeEffect
+import dev.chrisbanes.haze.HazeInput
+import dev.chrisbanes.haze.blur.HazeBlurStyle
+import dev.chrisbanes.haze.blur.hazeBlur
 import java.text.NumberFormat
 
 fun formatCount(count: Long): String = NumberFormat.getIntegerInstance().format(count)
@@ -318,12 +320,15 @@ fun GlassBottomBar(selectedRoute: String?, onSelect: (Destination) -> Unit, modi
                 .shadow(10.dp, shape, clip = false)
                 .clip(shape)
                 .then(
-                    if (hazeState != null) Modifier.hazeEffect(state = hazeState) {
-                        blurRadius = 18.dp
-                        blurredEdgeTreatment = BlurredEdgeTreatment(shape)
-                        backgroundColor = Color.Transparent
-                        alpha = .96f
-                    } else Modifier
+                    if (hazeState != null) Modifier.hazeBlur(
+                        input = HazeInput.Sources(hazeState),
+                        style = HazeBlurStyle {
+                            blurRadius(18.dp)
+                            blurredEdgeTreatment(BlurredEdgeTreatment(shape))
+                            backgroundColor(Color.Transparent)
+                            alpha(.96f)
+                        }
+                    ) else Modifier
                 ),
             shape = shape,
             color = surfaceColor.copy(alpha = .72f),

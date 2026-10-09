@@ -92,7 +92,7 @@ class MainActivity : ComponentActivity() {
                     animationSpec = tween(durationMillis = 520, easing = FastOutSlowInEasing),
                     label = "opening wallpaper transition"
                 ) { showSplash ->
-                    if (showSplash) SplashWallpaperScreen(darkTheme)
+                    if (showSplash) SplashWallpaperScreen()
                     else {
                         val isPasswordRecovery = authDeepLink.value?.getQueryParameter("type") == "recovery"
                         when {
@@ -101,7 +101,7 @@ class MainActivity : ComponentActivity() {
                                 passwordRecovery = true,
                                 onPasswordRecoveryComplete = { authDeepLink.value = null }
                             )
-                            authSession is AuthSessionState.Checking -> SplashWallpaperScreen(darkTheme)
+                            authSession is AuthSessionState.Checking -> SplashWallpaperScreen()
                             authSession is AuthSessionState.SignedIn -> NaamJapApp(
                                 themeChoice = themeChoice,
                                 onThemeChoice = themeViewModel::selectTheme,

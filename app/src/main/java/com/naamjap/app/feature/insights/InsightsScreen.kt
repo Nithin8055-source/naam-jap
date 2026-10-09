@@ -1,6 +1,9 @@
 package com.naamjap.app.feature.insights
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -12,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -47,7 +51,7 @@ import com.naamjap.app.ui.components.EmptyState
 import com.naamjap.app.ui.components.PremiumCard
 import com.naamjap.app.ui.components.StatCard
 import com.naamjap.app.ui.components.PremiumPullToRefreshBox
-import com.naamjap.app.ui.components.GoalProgressCard
+import com.naamjap.app.ui.components.JapCircularProgressIndicator
 import com.naamjap.app.ui.components.formatCount
 import com.naamjap.app.ui.components.navigationContentBottomInset
 import com.naamjap.app.ui.theme.JapSpacing
@@ -174,12 +178,19 @@ fun InsightsScreen(viewModel: InsightsViewModel = hiltViewModel()) {
                 )
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(JapSpacing.sm)) {
-                StatCard("Total Naam Jap", formatCount(practice.dashboard.lifetimeCount), Modifier.weight(1f))
-                StatCard("Current streak", "${practice.dashboard.currentStreak} days", Modifier.weight(1f))
+            PremiumCard(Modifier.fillMaxWidth()) {
+                Column(Modifier.fillMaxWidth().padding(JapSpacing.md), verticalArrangement = Arrangement.spacedBy(JapSpacing.xs)) {
+                    Text("Total Count", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        formatCount(practice.dashboard.lifetimeCount),
+                        style = MaterialTheme.typography.displayLarge,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text("Naam Jap saved in your account", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(JapSpacing.sm)) {
-                StatCard("Today", formatCount(practice.dashboard.todayCount), Modifier.weight(1f))
+                StatCard("Current streak", "${practice.dashboard.currentStreak} days", Modifier.weight(1f))
                 StatCard("Sessions today", practice.dashboard.sessionsToday.toString(), Modifier.weight(1f))
             }
 
@@ -219,12 +230,31 @@ fun InsightsScreen(viewModel: InsightsViewModel = hiltViewModel()) {
 
             val goal = practice.dashboard.dailyGoal.coerceAtLeast(1L)
             val progress = (practice.dashboard.todayCount.toDouble() / goal).coerceIn(0.0, 1.0)
-            GoalProgressCard(
-                goal = "Today's numerical goal: ${formatCount(goal)}",
-                percent = (progress * 100).toInt(),
-                remaining = "${formatCount((goal - practice.dashboard.todayCount).coerceAtLeast(0L))} remaining",
-                progress = progress.toFloat()
-            )
+            PremiumCard(Modifier.fillMaxWidth()) {
+                Row(
+                    Modifier.fillMaxWidth().padding(JapSpacing.md),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(JapSpacing.md)
+                ) {
+                    JapCircularProgressIndicator(
+                        progress = progress.toFloat(),
+                        modifier = Modifier.size(84.dp),
+                        strokeWidth = 7.dp
+                    ) {
+                        Text("${(progress * 100).toInt()}%", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(JapSpacing.xs)) {
+                        Text("Progress", style = MaterialTheme.typography.titleMedium)
+                        Text("Today's Goal", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("${formatCount(practice.dashboard.todayCount)} / ${formatCount(goal)}", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            if (practice.dashboard.todayCount >= goal) "Goal reached · keep going" else "${formatCount((goal - practice.dashboard.todayCount).coerceAtLeast(0L))} remaining",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
         }
     }
     }
@@ -326,9 +356,22 @@ private fun ActivityBarChart(
 
 @Composable
 private fun InsightBars(values: List<Long>, selectedIndex: Int, onSelect: (Int) -> Unit, modifier: Modifier) {
-    val barColor = MaterialTheme.colorScheme.primary
-    val gridColor = MaterialTheme.colorScheme.outlineVariant
+    val barColors = listOf(
+        MaterialTheme.colorScheme.primary,
+        MaterialTheme.colorScheme.secondary,
+        MaterialTheme.colorScheme.primaryContainer
+    )
+    val primaryBarColor = MaterialTheme.colorScheme.primary
+    val selectedBarColor = MaterialTheme.colorScheme.secondary
     val maxValue = values.maxOrNull()?.coerceAtLeast(1L) ?: 1L
+    val animatedHeights = values.mapIndexed { index, value ->
+        animateFloatAsState(
+            targetValue = (value.toDouble() / maxValue).toFloat(),
+            animationSpec = tween(durationMillis = 420),
+            label = "insight bar $index"
+        ).value
+    }
+    val gridColor = MaterialTheme.colorScheme.outlineVariant
     Canvas(
         modifier.height(148.dp).pointerInput(values.size) {
             detectTapGestures { position ->
@@ -343,10 +386,19 @@ private fun InsightBars(values: List<Long>, selectedIndex: Int, onSelect: (Int) 
             drawLine(gridColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 1.dp.toPx())
         }
         values.forEachIndexed { index, value ->
-            val height = (size.height - 8.dp.toPx()) * (value.toDouble() / maxValue).toFloat()
+            val height = (size.height - 8.dp.toPx()) * animatedHeights[index]
             if (height > 0f) {
+                val barColor = barColors[index % barColors.size]
                 drawRoundRect(
-                    color = barColor.copy(alpha = if (index == selectedIndex) .98f else .68f),
+                    brush = Brush.verticalGradient(
+                        colors = if (index == selectedIndex) {
+                            listOf(selectedBarColor, primaryBarColor)
+                        } else {
+                            listOf(barColor.copy(alpha = .78f), barColor.copy(alpha = .98f))
+                        },
+                        startY = size.height - height,
+                        endY = size.height
+                    ),
                     topLeft = Offset(index * slot + slot * .22f, size.height - height),
                     size = Size(slot * .56f, height.coerceAtLeast(3.dp.toPx())),
                     cornerRadius = CornerRadius(5.dp.toPx()),

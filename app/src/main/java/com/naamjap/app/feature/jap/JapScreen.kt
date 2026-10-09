@@ -1,6 +1,13 @@
 package com.naamjap.app.feature.jap
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -13,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.Spa
 import androidx.compose.material3.*
@@ -26,6 +34,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.layout.ContentScale
@@ -56,6 +70,8 @@ import com.naamjap.app.ui.theme.JapSpacing
 import com.naamjap.app.ui.theme.NaamJapTheme
 import com.naamjap.app.R
 import androidx.compose.ui.tooling.preview.Preview
+import kotlin.math.cos
+import kotlin.math.sin
 
 data class JapUiState(val title: String = "Naam Jap", val count: Int = 0)
 
@@ -71,6 +87,8 @@ class JapViewModel @Inject constructor(private val repository: com.naamjap.app.d
     private val actionsInFlight = mutableSetOf<Pair<String, com.naamjap.app.domain.repository.SessionAction>>()
     private val _isUserRefreshing = MutableStateFlow(false)
     val isUserRefreshing = _isUserRefreshing.asStateFlow()
+    private val _isSessionActionPending = MutableStateFlow(false)
+    val isSessionActionPending = _isSessionActionPending.asStateFlow()
     private var refreshJob: kotlinx.coroutines.Job? = null
 
     init {
@@ -134,8 +152,10 @@ class JapViewModel @Inject constructor(private val repository: com.naamjap.app.d
     }
 
     fun action(id: String, action: com.naamjap.app.domain.repository.SessionAction) {
+        if (_isSessionActionPending.value) return
         val key = id to action
         if (!actionsInFlight.add(key)) return
+        _isSessionActionPending.value = true
         val operationId = pendingActions.getOrPut(key) { java.util.UUID.randomUUID().toString() }
         viewModelScope.launch {
             try {
@@ -147,6 +167,7 @@ class JapViewModel @Inject constructor(private val repository: com.naamjap.app.d
                 // Retain the ID so the next user retry remains idempotent.
             } finally {
                 actionsInFlight.remove(key)
+                _isSessionActionPending.value = actionsInFlight.isNotEmpty()
             }
         }
     }
@@ -175,6 +196,7 @@ fun JapScreen(viewModel: JapViewModel = hiltViewModel()) {
     val isUserRefreshing by viewModel.isUserRefreshing.collectAsStateWithLifecycle()
     val active = data.activeSession
     val optimisticCount by viewModel.optimisticCount.collectAsStateWithLifecycle()
+    val isSessionActionPending by viewModel.isSessionActionPending.collectAsStateWithLifecycle()
     val displayedCount = maxOf(active?.count ?: 0L, optimisticCount?.takeIf { it.sessionId == active?.id }?.target ?: 0L)
     val formattedCount = com.naamjap.app.ui.components.formatCount(displayedCount)
     var liveDurationSeconds by remember(active?.id) { mutableLongStateOf(active?.durationSeconds ?: 0L) }
@@ -212,7 +234,7 @@ fun JapScreen(viewModel: JapViewModel = hiltViewModel()) {
             Spacer(Modifier.height(JapSpacing.xxl))
             Box(Modifier.size(300.dp), contentAlignment = Alignment.Center) {
                 Image(painterResource(R.drawable.ic_sacred_halo), null, Modifier.fillMaxSize().alpha(.13f), contentScale = ContentScale.Fit)
-                JapCircularProgressIndicator(progress = 0f, modifier = Modifier.size(272.dp), strokeWidth = 5.dp) {
+                AnimatedNaamRing(Modifier.size(272.dp), strokeWidth = 5.dp) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         AnimatedContent(targetState = formattedCount, label = "session count") {
                             Text(
@@ -241,28 +263,55 @@ fun JapScreen(viewModel: JapViewModel = hiltViewModel()) {
             Spacer(Modifier.height(JapSpacing.sm))
             Text("A calm space for your practice", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(JapSpacing.xxl))
-            Button(onClick = { active?.let { haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove); viewModel.increment(it.id) } }, enabled = active != null && !active.isPaused, interactionSource = countInteraction, modifier = Modifier.size(84.dp).scale(countScale), shape = CircleShape, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary), elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)) {
-                LotusMark(Modifier.size(34.dp), "Add one repetition")
+            Box(Modifier.size(112.dp), contentAlignment = Alignment.Center) {
+                Box(
+                    Modifier.fillMaxSize().background(
+                        Brush.radialGradient(
+                            listOf(MaterialTheme.colorScheme.primary.copy(alpha = .28f), MaterialTheme.colorScheme.primary.copy(alpha = .10f), Color.Transparent)
+                        ),
+                        CircleShape
+                    )
+                )
+                Button(
+                    onClick = { active?.let { haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove); viewModel.increment(it.id) } },
+                    enabled = active != null && !active.isPaused && !data.isSaving && !isSessionActionPending,
+                    interactionSource = countInteraction,
+                    modifier = Modifier.size(84.dp).scale(countScale).shadow(8.dp, CircleShape, clip = false),
+                    shape = CircleShape,
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
+                ) {
+                    LotusMark(Modifier.size(34.dp), "Add one Naam Jap")
+                }
             }
             Spacer(Modifier.height(JapSpacing.xs))
             Text(if (active == null) "Start a session to count" else "Tap to add one repetition", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(JapSpacing.lg))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { active?.let { viewModel.action(it.id, com.naamjap.app.domain.repository.SessionAction.UNDO) } }, enabled = active != null && active.count > 0 && !data.isSaving) { Icon(Icons.Default.Replay, null); Text("Undo") }
+                SessionActionControl(
+                    icon = Icons.Default.Replay,
+                    label = "Undo",
+                    enabled = active != null && active.count > 0 && !data.isSaving && !isSessionActionPending,
+                    onClick = { active?.let { viewModel.action(it.id, com.naamjap.app.domain.repository.SessionAction.UNDO) } }
+                )
                 Spacer(Modifier.width(JapSpacing.xxxl))
-                TextButton(onClick = { active?.let { viewModel.action(it.id, if (it.isPaused) com.naamjap.app.domain.repository.SessionAction.RESUME else com.naamjap.app.domain.repository.SessionAction.PAUSE) } }, enabled = active != null && !data.isSaving) { Icon(Icons.Default.Pause, null); Text(if (active?.isPaused == true) "Resume" else "Pause") }
+                SessionActionControl(
+                    icon = if (active?.isPaused == true) Icons.Default.PlayArrow else Icons.Default.Pause,
+                    label = if (active?.isPaused == true) "Resume" else "Pause",
+                    enabled = active != null && !data.isSaving && !isSessionActionPending,
+                    onClick = {
+                        active?.let {
+                            viewModel.action(it.id, if (it.isPaused) com.naamjap.app.domain.repository.SessionAction.RESUME else com.naamjap.app.domain.repository.SessionAction.PAUSE)
+                        }
+                    }
+                )
             }
             Spacer(Modifier.height(JapSpacing.xl))
             GlassSurface(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(JapSpacing.md)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(JapSpacing.md)) {
                         Box(Modifier.size(48.dp).background(MaterialTheme.colorScheme.primary.copy(alpha = .12f), CircleShape), contentAlignment = Alignment.Center) {
-                            Image(
-                                painter = painterResource(R.drawable.mala_beads),
-                                contentDescription = null,
-                                modifier = Modifier.size(48.dp).clip(CircleShape),
-                                contentScale = ContentScale.Crop
-                            )
+                            LotusMark(Modifier.size(30.dp), null)
                         }
                         Column(Modifier.weight(1f)) {
                             Text(active?.naamName ?: "Start a session", style = MaterialTheme.typography.titleMedium)
@@ -277,7 +326,7 @@ fun JapScreen(viewModel: JapViewModel = hiltViewModel()) {
                             } else {
                                 TextButton(
                                     onClick = { viewModel.action(active.id, com.naamjap.app.domain.repository.SessionAction.FINISH) },
-                                    enabled = !data.isSaving && (optimisticCount?.takeIf { it.sessionId == active.id }?.target ?: active.count) <= active.count
+                                    enabled = !data.isSaving && !isSessionActionPending && (optimisticCount?.takeIf { it.sessionId == active.id }?.target ?: active.count) <= active.count
                                 ) { Text("Finish session") }
                             }
                         }
@@ -295,6 +344,83 @@ fun JapScreen(viewModel: JapViewModel = hiltViewModel()) {
 private fun PreviewControl(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         IconButton(onClick = {}, enabled = false, modifier = Modifier.size(48.dp)) { Icon(icon, contentDescription = null) }
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun AnimatedNaamRing(
+    modifier: Modifier = Modifier,
+    strokeWidth: androidx.compose.ui.unit.Dp,
+    content: @Composable BoxScope.() -> Unit
+) {
+    val transition = rememberInfiniteTransition(label = "naam ring light")
+    val rotation by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(4_200, easing = LinearEasing), RepeatMode.Restart),
+        label = "revolving ring light"
+    )
+    val trackColor = MaterialTheme.colorScheme.secondary
+    val lightColor = MaterialTheme.colorScheme.primary
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            val stroke = strokeWidth.toPx()
+            val radius = size.minDimension / 2f - stroke / 2f
+            val center = Offset(size.width / 2f, size.height / 2f)
+            drawCircle(trackColor.copy(alpha = .24f), radius, center, style = Stroke(stroke))
+            val ringBrush = Brush.sweepGradient(
+                colors = listOf(
+                    Color.Transparent,
+                    lightColor.copy(alpha = .18f),
+                    trackColor.copy(alpha = .72f),
+                    Color.White.copy(alpha = .96f),
+                    lightColor.copy(alpha = .4f),
+                    Color.Transparent
+                ),
+                center = center
+            )
+            rotate(rotation, center) {
+                drawCircle(brush = ringBrush, radius = radius, center = center, style = Stroke(stroke))
+            }
+            val angle = Math.toRadians((rotation - 90f).toDouble()).toFloat()
+            val lightCenter = Offset(center.x + radius * cos(angle), center.y + radius * sin(angle))
+            val glowRadius = 24.dp.toPx()
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(Color.White.copy(alpha = .72f), lightColor.copy(alpha = .34f), Color.Transparent),
+                    center = lightCenter,
+                    radius = glowRadius
+                ),
+                radius = glowRadius,
+                center = lightCenter
+            )
+            drawCircle(Color.White.copy(alpha = .94f), radius = 3.dp.toPx(), center = lightCenter)
+        }
+        content()
+    }
+}
+
+@Composable
+private fun SessionActionControl(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        IconButton(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = Modifier.size(52.dp).shadow(3.dp, CircleShape).clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surface)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
         Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
@@ -356,7 +482,7 @@ fun ManualRecordScreen(onBack: () -> Unit) {
             OutlinedTextField(value = LocalDate.parse(selectedDate).format(dateFormatter), onValueChange = {}, readOnly = true, label = { Text("Date") }, trailingIcon = { IconButton(onClick = { showDatePicker = true }) { Icon(Icons.Default.CalendarMonth, contentDescription = "Choose date") } }, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium)
             PremiumTextField(value = note, onValueChange = { note = it.take(400) }, label = "Notes (optional)", singleLine = false, supportingText = "${note.length}/400")
             data.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            PrimaryActionButton("Save record", onClick = {
+            PrimaryActionButton("Save record", enabled = !data.isSaving, onClick = {
                 saveAttempted = true
                 scope.launch {
                     val amount = count.toLongOrNull()
@@ -365,7 +491,6 @@ fun ManualRecordScreen(onBack: () -> Unit) {
                     else if (naamId.isBlank()) snackbarHostState.showSnackbar("Choose a naam first.")
                     else try {
                         viewModel.save(pendingRecordId, amount, note, naamId, LocalDate.parse(selectedDate))
-                        snackbarHostState.showSnackbar("Record saved to your account.")
                         onBack()
                     } catch (cancelled: kotlinx.coroutines.CancellationException) {
                         throw cancelled

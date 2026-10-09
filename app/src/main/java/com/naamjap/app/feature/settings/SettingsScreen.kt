@@ -19,6 +19,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.tooling.preview.Preview
@@ -290,15 +291,38 @@ fun SettingsScreen(
         }
 
         GlassSurface(Modifier.fillMaxWidth()) {
-            SettingRow(
-                icon = Icons.Default.Spa,
-                title = "Naam / Mantra",
-                value = practice.naamTypes.firstOrNull { it.isDefault }?.name ?: "Choose Naam",
-                onClick = { selectNaamOpen = true },
-                enabled = !state.isSaving,
-                showChevron = true
-            )
-            SettingDivider()
+            Column(Modifier.fillMaxWidth()) {
+                SettingRow(
+                    icon = Icons.Default.Spa,
+                    title = "Default Naam",
+                    value = practice.naamTypes.firstOrNull { it.isDefault }?.name ?: "Choose Naam",
+                    onClick = { selectNaamOpen = true },
+                    enabled = !state.isSaving,
+                    showChevron = true
+                )
+                SettingDivider()
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = JapSpacing.md, vertical = JapSpacing.xs),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(JapSpacing.xs)
+                ) {
+                    OutlinedTextField(
+                        value = naamDraft,
+                        onValueChange = { naamDraft = it.take(80) },
+                        label = { Text("Add a Naam") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        enabled = !state.isSaving
+                    )
+                    TextButton(
+                        onClick = { viewModel.addNaam(naamDraft) },
+                        enabled = !state.isSaving && naamDraft.trim().length >= 2
+                    ) {
+                        if (state.isSaving) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        else Text("Add")
+                    }
+                }
+                SettingDivider()
             SettingRow(
                 icon = Icons.Default.TrackChanges,
                 title = "Daily Goal",
@@ -348,6 +372,7 @@ fun SettingsScreen(
                 enabled = true,
                 showChevron = true
             )
+            }
         }
 
         GlassSurface(Modifier.fillMaxWidth()) {
@@ -364,24 +389,6 @@ fun SettingsScreen(
             SettingRow(Icons.Default.Logout, "Sign out", "Sign out of this account", onClick = { confirmSignOut = true }, enabled = account != null && !state.isSaving)
             SettingDivider()
             SettingRow(Icons.Default.DeleteOutline, "Delete account", "Remove account and cloud data", onClick = { confirmDelete = true }, enabled = account != null && !state.isSaving, destructive = true)
-        }
-
-        GlassSurface(Modifier.fillMaxWidth()) {
-            Column(Modifier.fillMaxWidth().padding(JapSpacing.md), verticalArrangement = Arrangement.spacedBy(JapSpacing.sm)) {
-                Text("Manage Naam types", style = MaterialTheme.typography.titleMedium)
-                OutlinedTextField(
-                    value = naamDraft,
-                    onValueChange = { naamDraft = it.take(80) },
-                    label = { Text("Add a Naam type") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    trailingIcon = {
-                        TextButton(onClick = { viewModel.addNaam(naamDraft) }, enabled = !state.isSaving && naamDraft.trim().length >= 2) {
-                            if (state.isSaving) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text("Add")
-                        }
-                    }
-                )
-            }
         }
 
     }
@@ -580,8 +587,24 @@ private fun SettingRow(
         horizontalArrangement = Arrangement.spacedBy(JapSpacing.sm)
     ) {
         Icon(icon, null, tint = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(title, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = tint)
-        Text(value, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            title,
+            Modifier.weight(1f),
+            style = MaterialTheme.typography.bodyMedium,
+            color = tint,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            value,
+            Modifier.widthIn(max = 132.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis
+        )
         if (showChevron) Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

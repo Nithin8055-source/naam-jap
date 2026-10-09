@@ -2,7 +2,6 @@ import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.hilt)
@@ -35,7 +34,7 @@ if (supabasePublishableKey.isNotEmpty() && !supabasePublishableKey.startsWith("s
 
 android {
     namespace = "com.naamjap.app"
-    compileSdk = 35
+    compileSdk = 37
     defaultConfig {
         applicationId = "com.naamjap.app"
         minSdk = 26
@@ -53,7 +52,6 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
 }
 
 dependencies {
@@ -71,6 +69,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.haze)
+    implementation(libs.haze.blur)
     implementation(platform(libs.supabase.bom))
     implementation(libs.supabase.auth)
     implementation(libs.supabase.postgrest)

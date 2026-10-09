@@ -9,12 +9,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
@@ -36,13 +39,9 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.naamjap.app.domain.repository.PracticeHistoryItem
 import com.naamjap.app.domain.repository.PracticeRepository
-import com.naamjap.app.ui.components.DailyCountDisplay
 import com.naamjap.app.ui.components.EmptyState
-import com.naamjap.app.ui.components.GlassSurface
-import com.naamjap.app.ui.components.JapCircularProgressIndicator
 import com.naamjap.app.ui.components.PremiumCard
 import com.naamjap.app.ui.components.PremiumPullToRefreshBox
-import com.naamjap.app.ui.components.QuickActionItem
 import com.naamjap.app.ui.components.SectionHeader
 import com.naamjap.app.ui.components.SessionRow
 import com.naamjap.app.ui.components.StatCard
@@ -161,46 +160,31 @@ fun HomeScreen(onNavigate: (String) -> Unit, displayName: String? = null, viewMo
                 }
             }
         } else {
-            GlassSurface(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(JapSpacing.md)) {
-                    DailyCountDisplay(formatCount(data.dashboard.todayCount), "Today's Naam Jap")
-                    Spacer(Modifier.height(JapSpacing.sm))
-                    val goal = data.dashboard.dailyGoal.coerceAtLeast(1)
-                    val progress = (data.dashboard.todayCount.toDouble() / goal).coerceIn(0.0, 1.0)
-                    PremiumCard(Modifier.fillMaxWidth()) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(JapSpacing.md),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(JapSpacing.md)
-                        ) {
-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(JapSpacing.xs)) {
-                                Text("Daily goal", style = MaterialTheme.typography.titleMedium)
-                                Text("${formatCount(goal)} Naam Jap", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text(
-                                    "${formatCount(data.dashboard.todayCount)} / ${formatCount(goal)}",
-                                    style = MaterialTheme.typography.labelLarge
-                                )
-                                val remaining = (goal - data.dashboard.todayCount).coerceAtLeast(0)
-                                Text(
-                                    if (remaining == 0L) "Goal reached — keep going" else "${formatCount(remaining)} remaining",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            JapCircularProgressIndicator(
-                                progress = progress.toFloat(),
-                                modifier = Modifier.size(68.dp),
-                                strokeWidth = 6.dp
-                            ) {
-                                Text(
-                                    "${(progress * 100).toInt()}%",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        }
+            val goal = data.dashboard.dailyGoal.coerceAtLeast(1L)
+            val progress = (data.dashboard.todayCount.toDouble() / goal).coerceIn(0.0, 1.0)
+            val remaining = (goal - data.dashboard.todayCount).coerceAtLeast(0L)
+            PremiumCard(Modifier.fillMaxWidth()) {
+                Column(
+                    Modifier.fillMaxWidth().padding(JapSpacing.md),
+                    verticalArrangement = Arrangement.spacedBy(JapSpacing.sm)
+                ) {
+                    Text("Today's Total", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+                    Text(formatCount(data.dashboard.todayCount), style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.SemiBold)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Goal: ${formatCount(goal)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("${(progress * 100).toInt()}%", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                     }
+                    LinearProgressIndicator(
+                        progress = { progress.toFloat() },
+                        modifier = Modifier.fillMaxWidth().height(8.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
+                    Text(
+                        if (remaining == 0L) "Goal reached · keep going" else "${formatCount(remaining)} remaining",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(JapSpacing.xs)) {
@@ -214,22 +198,21 @@ fun HomeScreen(onNavigate: (String) -> Unit, displayName: String? = null, viewMo
 
             SectionHeader("Quick actions")
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(JapSpacing.sm)) {
-                QuickActionItem(
+                HomeQuickActionCard(
                     label = "Start Jap",
                     description = "Begin a live session",
                     onClick = { onNavigate("jap") },
-                    icon = { androidx.compose.material3.Icon(Icons.Outlined.SelfImprovement, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                    icon = { Icon(Icons.Outlined.SelfImprovement, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(24.dp)) },
                     modifier = Modifier.weight(1f)
                 )
-                QuickActionItem(
+                HomeQuickActionCard(
                     label = "Add record",
                     description = "Enter a daily count",
                     onClick = { onNavigate("manual-record") },
-                    icon = { androidx.compose.material3.Icon(Icons.Default.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                    icon = { Icon(Icons.Default.Add, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(24.dp)) },
                     modifier = Modifier.weight(1f)
                 )
             }
-
             SectionHeader("Recent activity", action = "View all", onAction = { onNavigate("history") })
             when {
                 state.isLoading && state.recentRecords.isEmpty() -> CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
@@ -246,5 +229,34 @@ fun HomeScreen(onNavigate: (String) -> Unit, displayName: String? = null, viewMo
             }
         }
     }
+    }
+}
+@Composable
+private fun HomeQuickActionCard(
+    label: String,
+    description: String,
+    onClick: () -> Unit,
+    icon: @Composable () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier.height(128.dp),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .7f)),
+        shadowElevation = 2.dp
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(JapSpacing.md),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(JapSpacing.xs)
+        ) {
+            Surface(modifier = Modifier.size(44.dp), shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer) {
+                androidx.compose.foundation.layout.Box(contentAlignment = Alignment.Center) { icon() }
+            }
+            Text(label, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }

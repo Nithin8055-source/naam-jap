@@ -34,7 +34,7 @@ if (supabasePublishableKey.isNotEmpty() && !supabasePublishableKey.startsWith("s
 
 android {
     namespace = "com.naamjap.app"
-    compileSdk = 37
+    compileSdk = 36
     defaultConfig {
         applicationId = "com.naamjap.app"
         minSdk = 26

@@ -1,0 +1,230 @@
+
+name: Naam Jap Weekly Supabase CSV Backup
+
+on:
+  schedule:
+    # Every Sunday at 02:00 UTC (07:30 AM IST)
+    - cron: "0 2 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: naam-jap-supabase-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    name: Export Supabase tables to CSV
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      BACKUP_DATE: ${{ github.run_id }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Export Supabase tables to CSV
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import csv
+          import io
+          import json
+          import os
+          import sys
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          base_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+          api_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+
+          if not base_url or not api_key:
+              sys.exit(
+                  "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY. "
+                  "Configure both in GitHub repository secrets."
+              )
+
+          if not base_url.startswith("https://"):
+              sys.exit("SUPABASE_URL must use HTTPS.")
+
+          tables = [
+              "jap_records",
+              "jap_sessions",
+              "daily_goals",
+          ]
+
+          page_size = 1000
+          output_dir = Path("supabase-backups")
+          output_dir.mkdir(parents=True, exist_ok=True)
+
+          backup_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+          backup_dir = output_dir / backup_date
+          backup_dir.mkdir(parents=True, exist_ok=True)
+
+          headers = {
+              "apikey": api_key,
+              "Authorization": f"Bearer {api_key}",
+              "Accept": "application/json",
+          }
+
+          def fetch_table(table):
+              rows = []
+              offset = 0
+
+              while True:
+                  url = (
+                      f"{base_url}/rest/v1/"
+                      f"{urllib.parse.quote(table, safe='')}"
+                      "?select=*"
+                  )
+
+                  request = urllib.request.Request(
+                      url,
+                      headers={
+                          **headers,
+                          "Range-Unit": "items",
+                          "Range": f"{offset}-{offset + page_size - 1}",
+                      },
+                      method="GET",
+                  )
+
+                  try:
+                      with urllib.request.urlopen(
+                          request, timeout=60
+                      ) as response:
+                          batch = json.loads(
+                              response.read().decode("utf-8")
+                          )
+                  except urllib.error.HTTPError as exc:
+                      details = exc.read().decode(
+                          "utf-8", errors="replace"
+                      )
+                      raise RuntimeError(
+                          f"Supabase export failed for {table}: "
+                          f"HTTP {exc.code}: {details}"
+                      ) from exc
+
+                  if not isinstance(batch, list):
+                      raise RuntimeError(
+                          f"Unexpected response for table {table}"
+                      )
+
+                  rows.extend(batch)
+
+                  if len(batch) < page_size:
+                      break
+
+                  offset += page_size
+
+              return rows
+
+          def csv_value(value):
+              if value is None:
+                  return ""
+              if isinstance(value, (dict, list)):
+                  return json.dumps(
+                      value, ensure_ascii=False, separators=(",", ":")
+                  )
+              return value
+
+          try:
+              for table in tables:
+                  print(f"Exporting table: {table}")
+
+                  rows = fetch_table(table)
+                  file_path = backup_dir / f"{table}.csv"
+
+                  # Build columns from returned rows.
+                  columns = list(
+                      dict.fromkeys(
+                          key for row in rows for key in row.keys()
+                      )
+                  )
+
+                  with file_path.open(
+                      "w", newline="", encoding="utf-8-sig"
+                  ) as csv_file:
+                      if columns:
+                          writer = csv.DictWriter(
+                              csv_file,
+                              fieldnames=columns,
+                              extrasaction="ignore",
+                          )
+                          writer.writeheader()
+                          for row in rows:
+                              writer.writerow({
+                                  key: csv_value(row.get(key))
+                                  for key in columns
+                              })
+
+                  print(
+                      f"Exported {len(rows)} rows to {file_path}"
+                  )
+
+              # Include a small manifest, not credentials or row contents.
+              manifest = {
+                  "backup_date_utc": backup_date,
+                  "tables": tables,
+                  "format": "CSV",
+              }
+
+              (backup_dir / "manifest.json").write_text(
+                  json.dumps(manifest, indent=2),
+                  encoding="utf-8",
+              )
+
+          except Exception as exc:
+              print(f"Backup failed: {exc}", file=sys.stderr)
+              sys.exit(1)
+          PY
+
+      - name: Upload weekly CSV backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: naam-jap-supabase-csv-${{ github.run_id }}
+          path: supabase-backups/
+          if-no-files-found: error
+          retention-days: 21
+          compression-level: 6
+
+      - name: Retain only the latest three backup artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gh api \
+            --paginate \
+            "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" \
+            --jq '.artifacts[]
+              | select(.name | startswith("naam-jap-supabase-csv-"))
+              | [.id, .created_at]
+              | @tsv' \
+            | sort -t "$(printf '\t')" -k2,2r \
+            | tail -n +4 \
+            | cut -f1 \
+            | while read -r artifact_id; do
+                if [ -n "$artifact_id" ]; then
+                  echo "Deleting old backup artifact ID: $artifact_id"
+                  gh api --method DELETE \
+                    "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}"
+                fi
+              done

@@ -33,14 +33,14 @@ if (supabasePublishableKey.isNotEmpty() && !supabasePublishableKey.startsWith("s
 }
 
 android {
-    namespace = "com.naamjap.app"
+    namespace = "com.naamjap.counterapp"
     compileSdk = 37
     defaultConfig {
-        applicationId = "com.naamjap.app"
+        applicationId = "com.naamjap.counterapp"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.0.2"
+        versionCode = 3
+        versionName = "1.0.3"
         buildConfigField("String", "SUPABASE_URL", buildConfigString(supabaseUrl))
         buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", buildConfigString(supabasePublishableKey))
     }

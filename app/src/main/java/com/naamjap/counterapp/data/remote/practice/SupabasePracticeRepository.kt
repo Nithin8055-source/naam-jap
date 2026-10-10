@@ -1,0 +1,642 @@
+package com.naamjap.counterapp.data.remote.practice
+
+import com.naamjap.counterapp.data.remote.SupabaseProvider
+import com.naamjap.counterapp.data.remote.NetworkStatus
+import com.naamjap.counterapp.data.remote.DatabaseOperationException
+import com.naamjap.counterapp.data.remote.logSafeSupabaseFailure
+import com.naamjap.counterapp.data.remote.safeSupabaseError
+import com.naamjap.counterapp.domain.model.PracticeRecord
+import com.naamjap.counterapp.domain.repository.ActiveJapSession
+import com.naamjap.counterapp.domain.repository.NaamType
+import com.naamjap.counterapp.domain.repository.PracticeDashboard
+import com.naamjap.counterapp.domain.repository.PracticeDataState
+import com.naamjap.counterapp.domain.repository.PracticeHistoryItem
+import com.naamjap.counterapp.domain.repository.PracticeRepository
+import com.naamjap.counterapp.domain.repository.SessionAction
+import com.naamjap.counterapp.notifications.NotificationEvents
+import com.naamjap.counterapp.notifications.NotificationEventKind
+import io.github.jan.supabase.auth.auth
+import io.github.jan.supabase.auth.status.SessionStatus
+import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.postgrest.rpc
+import io.github.jan.supabase.postgrest.query.Order
+import io.github.jan.supabase.postgrest.query.Columns
+import java.time.Instant
+import java.time.LocalDate
+import java.time.OffsetDateTime
+import java.time.ZoneId
+import java.util.UUID
+import javax.inject.Inject
+import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+
+@Singleton
+class SupabasePracticeRepository @Inject constructor(
+    private val provider: SupabaseProvider,
+    private val networkStatus: NetworkStatus,
+    private val notificationEvents: NotificationEvents
+) : PracticeRepository {
+    private val _state = MutableStateFlow(PracticeDataState())
+    override val state: StateFlow<PracticeDataState> = _state.asStateFlow()
+    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val loadMutex = Mutex()
+    private val actionMutex = Mutex()
+    private var activeUserId: String? = null
+    private var pendingStart: PendingStart? = null
+
+    init {
+        provider.client?.auth?.sessionStatus?.onEach { session ->
+            when (session) {
+                is SessionStatus.Authenticated -> {
+                    val userId = session.session.user?.id
+                    if (userId != null && activeUserId != null && userId != activeUserId) {
+                        clearForSignedOutUser()
+                    }
+                    activeUserId = userId
+                }
+                is SessionStatus.NotAuthenticated -> clearForSignedOutUser()
+                else -> Unit
+            }
+        }?.launchIn(ioScope)
+    }
+
+    override suspend fun refresh(timeZoneId: String) = loadMutex.withLock {
+        var transientAttempt = 0
+        while (true) {
+          _state.value = _state.value.copy(isLoading = true, error = null, canRetry = false, message = null)
+          try {
+            val userId = currentUserId()
+            resetForAccountIfNeeded(userId)
+        ZoneId.of(timeZoneId)
+            val client = client()
+            kotlinx.coroutines.coroutineScope {
+            val names = async {
+                traced("naam_types.select") {
+                    client.from("naam_types").select(columns = Columns.list("id", "name", "is_default", "created_at")) {
+                        filter { eq("user_id", userId) }
+                        order("created_at", Order.ASCENDING)
+                        limit(count = 500)
+                    }.decodeList<NaamTypeRow>()
+                }
+            }
+            val activeSession = async {
+                traced("rpc.get_active_jap_session") {
+                    client.postgrest.rpc("get_active_jap_session").decodeList<SessionRow>().firstOrNull()
+                }
+            }
+            val dashboard = async {
+                traced("rpc.get_practice_dashboard") {
+                    client.postgrest.rpc("get_practice_dashboard", DashboardArgs(timeZoneId))
+                        .decodeList<DashboardRow>().firstOrNull()
+                }
+            }
+
+            val nameRows = names.await()
+            val naamById = nameRows.associate { it.id to it.name }
+            val activeRow = activeSession.await()
+            val statsRow = dashboard.await()
+            val active = activeRow?.let { row ->
+                sessionDurations(listOf(row.id))[row.id]?.let { duration -> row.toDomain(naamById, duration) }
+                    ?: row.toDomain(naamById, SessionDuration(0, false))
+            }
+            _state.value = _state.value.copy(
+                isLoading = false,
+                hasLoaded = true,
+                error = null,
+                canRetry = false,
+                naamTypes = nameRows.map(NaamTypeRow::toDomain),
+                activeSession = active,
+                dashboard = statsRow?.toDomain() ?: PracticeDashboard()
+            )
+            }
+            return@withLock
+          } catch (cancelled: CancellationException) {
+            _state.value = _state.value.copy(isLoading = false)
+            throw cancelled
+          } catch (error: Exception) {
+            if (transientAttempt < 2 && error.isTransientNetworkFailure()) {
+                transientAttempt++
+                delay(350L * transientAttempt)
+                continue
+            }
+            _state.value = _state.value.copy(
+                isLoading = false,
+                error = safeSupabaseError(error, networkStatus.hasValidatedInternet()),
+                canRetry = true
+            )
+            throw error
+          }
+        }
+    }
+
+    override suspend fun loadHistoryPage(
+        offset: Int,
+        limit: Int,
+        fromDate: LocalDate?,
+        throughDate: LocalDate?
+    ): List<PracticeHistoryItem> = withContext(Dispatchers.IO) {
+        require(offset >= 0 && limit in 1..100) { "History page is invalid." }
+        val userId = currentUserId()
+        val page = offset.toLong()..(offset + limit - 1).toLong()
+        val client = client()
+        val nameRows = traced("history.naam_types.select") {
+            client.from("naam_types").select(columns = Columns.list("id", "name", "is_default")) {
+                filter { eq("user_id", userId) }
+                limit(count = 500)
+            }.decodeList<NaamTypeRow>()
+        }
+        val naamById = nameRows.associate { it.id to it.name }
+        val records = traced("history.jap_records.select") {
+            client.from("jap_records").select(columns = Columns.list("id", "user_id", "naam_id", "count", "record_date", "notes", "created_at", "session_id")) {
+                filter {
+                    eq("user_id", userId)
+                    if (fromDate != null) gte("record_date", fromDate.toString())
+                    if (throughDate != null) lte("record_date", throughDate.toString())
+                }
+                order("created_at", Order.DESCENDING)
+                order("id", Order.DESCENDING)
+                range(page)
+            }.decodeList<RecordRow>()
+        }
+        val durations = sessionDurations(records.mapNotNull(RecordRow::sessionId))
+        records.map { row ->
+            PracticeHistoryItem(
+                id = row.id,
+                date = LocalDate.parse(row.recordDate),
+                naamName = naamById[row.naamId] ?: "Naam",
+                count = row.count,
+                durationSeconds = row.sessionId?.let { durations[it]?.seconds },
+                note = row.notes,
+                isSession = row.sessionId != null,
+                sortAt = row.createdAt.toInstantOrUtc(),
+                sessionId = row.sessionId
+            )
+        }
+            .sortedByDescending(PracticeHistoryItem::sortAt)
+    }
+
+    override suspend fun ensureDefaultNaamType(): NaamType = actionMutex.withLock {
+        val row = traced("rpc.ensure_default_naam_type") { client().postgrest.rpc("ensure_default_naam_type").decodeList<NaamTypeRow>().single() }
+        refresh(ZoneId.systemDefault().id)
+        row.toDomain()
+    }
+
+    override suspend fun createNaamType(name: String): NaamType = actionMutex.withLock {
+        val normalized = name.trim()
+        require(normalized.length in 2..80) { "Enter a naam between 2 and 80 characters." }
+        val request = CreateNaamArgs(UUID.randomUUID().toString(), normalized)
+        val row = traced("rpc.create_naam_type") { client().postgrest.rpc("create_naam_type", request).decodeList<NaamTypeRow>().single() }
+        refresh(ZoneId.systemDefault().id)
+        row.toDomain()
+    }
+
+    override suspend fun setDefaultNaamType(id: String): NaamType = actionMutex.withLock {
+        val userId = currentUserId()
+        val row = traced("rpc.set_default_naam_type") { client().postgrest.rpc("set_default_naam_type", NaamIdArgs(id)).decodeList<NaamTypeRow>().single() }
+        refreshAfterWrite()
+        val selected = row.toDomain()
+        val currentNames = _state.value.naamTypes
+        val hasSelectedName = currentNames.any { it.id == selected.id }
+        _state.value = _state.value.copy(
+            naamTypes = currentNames.map { it.copy(isDefault = it.id == selected.id) } +
+                if (hasSelectedName) emptyList() else listOf(selected),
+            message = "Default Naam updated.",
+            error = null
+        )
+        notificationEvents.publish(userId, NotificationEventKind.DEFAULT_NAAM_CHANGED, id)
+        selected
+    }
+
+    override suspend fun deleteNaamType(id: String) {
+        actionMutex.withLock {
+            val userId = currentUserId()
+            var replacementDefaultId: String? = null
+            setSaving()
+            try {
+                val selected = traced("naam_type.delete_check") {
+                    client().from("naam_types").select(columns = Columns.list("id", "is_default")) {
+                        filter { eq("id", id); eq("user_id", userId) }
+                        limit(count = 1)
+                    }.decodeList<NaamTypeDeleteCheckRow>().singleOrNull()
+                } ?: throw IllegalArgumentException("This Naam type was not found in your account. Refresh and try again.")
+
+                require(selected.isDefault != null) { "This Naam type's default status could not be verified." }
+
+                val sessionReferences = traced("naam_type.delete_session_references") {
+                    client().from("jap_sessions").select(columns = Columns.list("id")) {
+                        filter { eq("user_id", userId); eq("naam_id", id) }
+                        limit(count = 1)
+                    }.decodeList<NaamTypeReferenceRow>().isNotEmpty()
+                }
+                val recordReferences = traced("naam_type.delete_record_references") {
+                    client().from("jap_records").select(columns = Columns.list("id")) {
+                        filter { eq("user_id", userId); eq("naam_id", id) }
+                        limit(count = 1)
+                    }.decodeList<NaamTypeReferenceRow>().isNotEmpty()
+                }
+                require(!sessionReferences && !recordReferences) {
+                    "This Naam type is used by saved practice and cannot be deleted."
+                }
+
+                if (selected.isDefault) {
+                    val replacement = traced("naam_type.delete_default_replacement") {
+                        client().from("naam_types").select(columns = Columns.list("id", "is_default")) {
+                            filter {
+                                eq("user_id", userId)
+                                neq("id", id)
+                                eq("is_default", false)
+                            }
+                            limit(count = 1)
+                        }.decodeList<NaamTypeDeleteCheckRow>().singleOrNull()
+                    } ?: throw IllegalArgumentException("Add another Naam type before deleting the default.")
+
+                    val newDefault = traced("rpc.set_default_naam_type_before_delete") {
+                        client().postgrest.rpc("set_default_naam_type", NaamIdArgs(replacement.id))
+                            .decodeList<NaamTypeRow>().single()
+                    }.toDomain()
+                    replacementDefaultId = newDefault.id
+                    _state.value = _state.value.copy(
+                        naamTypes = _state.value.naamTypes.map { it.copy(isDefault = it.id == newDefault.id) },
+                        message = "Default Naam updated.",
+                        error = null
+                    )
+                }
+
+                traced("naam_type.delete") {
+                    client().from("naam_types").delete {
+                        filter { eq("id", id); eq("user_id", userId); eq("is_default", false) }
+                    }
+                }
+                refreshAfterWrite()
+                check(_state.value.naamTypes.none { it.id == id }) {
+                    "The delete was not confirmed by Supabase. Refresh and try again."
+                }
+                _state.value = _state.value.copy(message = "Naam type deleted.", error = null, isSaving = false)
+                replacementDefaultId?.let {
+                    notificationEvents.publish(userId, NotificationEventKind.DEFAULT_NAAM_CHANGED, "deleted-$id-default-$it")
+                }
+            } catch (cancelled: CancellationException) {
+                _state.value = _state.value.copy(isSaving = false)
+                throw cancelled
+            } catch (error: Exception) {
+                _state.value = _state.value.copy(
+                    isSaving = false,
+                    error = safeSupabaseError(error, networkStatus.hasValidatedInternet()),
+                    canRetry = false
+                )
+                throw error
+            }
+            }
+    }
+
+    override suspend fun startSession(naamId: String): ActiveJapSession = actionMutex.withLock {
+        val userId = currentUserId()
+        resetForAccountIfNeeded(userId)
+        val pending = pendingStart?.takeIf { it.naamId == naamId } ?: PendingStart(UUID.randomUUID().toString(), naamId).also { pendingStart = it }
+        setSaving()
+        try {
+            val row = traced("rpc.start_jap_session") {
+                client().postgrest.rpc(
+                    "start_jap_session",
+                    StartSessionArgs(operationId = pending.operationId, naamId = pending.naamId)
+                ).decodeList<SessionRow>().single()
+            }
+            pendingStart = null
+            refreshAfterWrite()
+            val activeSession = _state.value.activeSession?.takeIf { it.id == row.id }
+                ?: row.toDomain(
+                    _state.value.naamTypes.associate { it.id to it.name },
+                    SessionDuration(0, false)
+                )
+            _state.value = _state.value.copy(
+                activeSession = activeSession,
+                isSaving = false,
+                message = "Session saved to your account.",
+                error = null
+            )
+            activeSession
+        } catch (cancelled: CancellationException) {
+            _state.value = _state.value.copy(isSaving = false)
+            throw cancelled
+        } catch (error: Exception) {
+            _state.value = _state.value.copy(isSaving = false, error = safeSupabaseError(error, networkStatus.hasValidatedInternet()), canRetry = false)
+            throw error
+        }
+    }
+
+    override suspend fun applySessionAction(sessionId: String, action: SessionAction, operationId: String): ActiveJapSession = actionMutex.withLock {
+        val finishingUserId = if (action == SessionAction.FINISH) currentUserId() else null
+        setSaving()
+        try {
+            val row = traced("rpc.apply_jap_session_action") {
+                client().postgrest.rpc(
+                    "apply_jap_session_action",
+                    SessionActionArgs(sessionId, operationId, action.name.lowercase(), ZoneId.systemDefault().id)
+                ).decodeList<SessionRow>().single()
+            }
+            val previous = _state.value.activeSession?.takeIf { it.id == sessionId }
+            val durationRow = if (action == SessionAction.PAUSE || action == SessionAction.RESUME) {
+                sessionDurations(listOf(row.id))[row.id]
+            } else null
+            val duration = durationRow?.seconds ?: previous?.durationSeconds ?: 0L
+            val paused = when (action) {
+                SessionAction.PAUSE -> true
+                SessionAction.RESUME, SessionAction.FINISH -> false
+                else -> previous?.isPaused ?: false
+            }
+            val updated = row.toDomain(
+                _state.value.naamTypes.associate { it.id to it.name },
+                SessionDuration(duration, paused)
+            )
+            _state.value = _state.value.copy(
+                activeSession = if (action == SessionAction.FINISH) null else updated,
+                isSaving = false,
+                message = if (action == SessionAction.FINISH) "Session saved to your account." else "Cloud session updated.",
+                error = null
+            )
+            if (action == SessionAction.FINISH) {
+                refreshAfterWrite()
+                finishingUserId?.let { notificationEvents.publish(it, NotificationEventKind.SESSION_FINISHED, operationId) }
+            }
+            updated
+        } catch (cancelled: CancellationException) {
+            _state.value = _state.value.copy(isSaving = false)
+            throw cancelled
+        } catch (error: Exception) {
+            _state.value = _state.value.copy(isSaving = false, error = safeSupabaseError(error, networkStatus.hasValidatedInternet()), canRetry = false)
+            throw error
+        }
+    }
+
+    override suspend fun deleteSession(sessionId: String) = actionMutex.withLock {
+        setSaving()
+        try {
+            val safeSessionId = runCatching { UUID.fromString(sessionId).toString() }.getOrElse { "invalid-session-id" }
+            traced("rpc.delete_jap_session", diagnosticContext = "session_id=$safeSessionId") {
+                client().postgrest.rpc("delete_jap_session", SessionIdArgs(sessionId))
+            }
+            refreshAfterWrite()
+            _state.value = _state.value.copy(message = "Session deleted.", error = null)
+        } catch (cancelled: CancellationException) {
+            _state.value = _state.value.copy(isSaving = false)
+            throw cancelled
+        } catch (error: Exception) {
+            _state.value = _state.value.copy(isSaving = false, error = safeSupabaseError(error, networkStatus.hasValidatedInternet()), canRetry = false)
+            throw error
+        }
+    }
+
+    override suspend fun deleteManualRecord(recordId: String) = actionMutex.withLock {
+        val userId = currentUserId()
+        setSaving()
+        try {
+            val row = traced("manual_record.delete_check") {
+                client().from("jap_records").select(columns = Columns.list("id", "session_id")) {
+                    filter { eq("id", recordId); eq("user_id", userId) }
+                }.decodeSingle<RecordDeleteCheckRow>()
+            }
+            require(row.sessionId == null) { "Live session records must be deleted with their session." }
+            traced("manual_record.delete") {
+                client().from("jap_records").delete {
+                    filter { eq("id", recordId); eq("user_id", userId) }
+                }
+            }
+            refreshAfterWrite()
+            _state.value = _state.value.copy(message = "Record deleted.", error = null)
+            notificationEvents.publish(userId, NotificationEventKind.RECORD_DELETED, recordId)
+        } catch (cancelled: CancellationException) {
+            _state.value = _state.value.copy(isSaving = false)
+            throw cancelled
+        } catch (error: Exception) {
+            _state.value = _state.value.copy(isSaving = false, error = safeSupabaseError(error, networkStatus.hasValidatedInternet()), canRetry = false)
+            throw error
+        }
+    }
+
+    override suspend fun saveManualRecord(record: PracticeRecord, naamId: String, date: LocalDate) = actionMutex.withLock {
+        val userId = currentUserId()
+        require(record.count > 0) { "Enter a count greater than zero." }
+        val pendingId = pendingRecordIds.getOrPut(record.id) { record.id }
+        setSaving()
+        try {
+            traced("rpc.create_jap_record") {
+                client().postgrest.rpc(
+                    "create_jap_record",
+                    CreateRecordArgs(
+                        id = pendingId,
+                        naamId = naamId,
+                        count = record.count,
+                        recordDate = date.toString(),
+                        notes = record.note
+                    )
+                ).decodeList<RecordRow>().single()
+            }
+            pendingRecordIds.remove(record.id)
+            refreshAfterWrite()
+            _state.value = _state.value.copy(message = "Record saved to your account.", error = null)
+            notificationEvents.publish(userId, NotificationEventKind.RECORD_ADDED, record.id)
+        } catch (cancelled: CancellationException) {
+            _state.value = _state.value.copy(isSaving = false)
+            throw cancelled
+        } catch (error: Exception) {
+            _state.value = _state.value.copy(isSaving = false, error = safeSupabaseError(error, networkStatus.hasValidatedInternet()), canRetry = false)
+            throw error
+        }
+    }
+
+    override suspend fun saveDailyGoal(targetCount: Long) = actionMutex.withLock {
+        val userId = currentUserId()
+        require(targetCount in 1..1_000_000_000) { "Daily goal is out of range." }
+        setSaving()
+        try {
+            val savedGoal = traced("rpc.save_daily_goal") {
+                client().postgrest.rpc("save_daily_goal", DailyGoalArgs(targetCount)).decodeList<DailyGoalRow>().single()
+            }
+            refreshAfterWrite()
+            _state.value = _state.value.copy(
+                dashboard = _state.value.dashboard.copy(dailyGoal = savedGoal.targetCount),
+                isSaving = false,
+                message = "Daily goal saved to your account.",
+                error = null
+            )
+            notificationEvents.publish(userId, NotificationEventKind.DAILY_GOAL_CHANGED, java.util.UUID.randomUUID().toString())
+        } catch (cancelled: CancellationException) {
+            _state.value = _state.value.copy(isSaving = false)
+            throw cancelled
+        } catch (error: Exception) {
+            _state.value = _state.value.copy(isSaving = false, error = safeSupabaseError(error, networkStatus.hasValidatedInternet()), canRetry = false)
+            throw error
+        }
+    }
+
+    override fun clearForSignedOutUser() {
+        activeUserId = null
+        pendingStart = null
+        pendingRecordIds.clear()
+        _state.value = PracticeDataState()
+    }
+
+    private suspend fun sessionDurations(sessionIds: List<String>): Map<String, SessionDuration> {
+        if (sessionIds.isEmpty()) return emptyMap()
+        return traced("rpc.get_jap_session_durations") {
+            client().postgrest.rpc("get_jap_session_durations", SessionIdsArgs(sessionIds))
+                .decodeList<SessionDurationRow>().associate {
+                    it.sessionId to SessionDuration(it.durationSeconds, it.isPaused == true)
+                }
+        }
+    }
+
+    private suspend fun <T> traced(
+        operation: String,
+        diagnosticContext: String? = null,
+        request: suspend () -> T
+    ): T = try {
+        request()
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (error: Exception) {
+        logSafeSupabaseFailure(operation, error, diagnosticContext)
+        _state.value = _state.value.copy(
+            error = safeSupabaseError(error, networkStatus.hasValidatedInternet()),
+            canRetry = operation.startsWith("rpc.get_") || operation.contains(".select")
+        )
+        throw DatabaseOperationException(operation, error)
+    }
+
+    private suspend fun refreshAfterWrite() {
+        try {
+            refresh(ZoneId.systemDefault().id)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // The successful write remains confirmed; refresh stores its own safe error and operation log.
+        }
+    }
+
+    private fun setSaving() {
+        _state.value = _state.value.copy(isSaving = true, error = null, canRetry = false, message = null)
+    }
+
+    private fun resetForAccountIfNeeded(userId: String) {
+        if (activeUserId != userId) {
+            clearForSignedOutUser()
+            activeUserId = userId
+        }
+    }
+
+    private fun currentUserId(): String = requireNotNull(client().auth.currentUserOrNull()?.id) {
+        "Authentication is required."
+    }
+
+    private fun Throwable.isTransientNetworkFailure(): Boolean =
+        generateSequence(this) { it.cause }.take(8).any {
+            it is java.io.IOException || it.javaClass.simpleName in setOf(
+                "ConnectTimeoutException", "SocketTimeoutException", "UnknownHostException", "ConnectException", "HttpRequestTimeoutException"
+            )
+        }
+
+    private fun client() = requireNotNull(provider.client) { "Supabase is not configured." }
+
+    private data class PendingStart(val operationId: String, val naamId: String)
+    private val pendingRecordIds = mutableMapOf<String, String>()
+
+    @Serializable private data class DashboardArgs(@SerialName("p_timezone") val timeZone: String)
+    @Serializable private data class DashboardRow(
+        @SerialName("today_count") val todayCount: Long,
+        @SerialName("lifetime_count") val lifetimeCount: Long,
+        @SerialName("sessions_today") val sessionsToday: Long,
+        @SerialName("current_streak") val currentStreak: Int,
+        @SerialName("daily_goal") val dailyGoal: Long
+    ) { fun toDomain() = PracticeDashboard(todayCount, lifetimeCount, sessionsToday, currentStreak, dailyGoal) }
+    @Serializable private data class NaamIdArgs(@SerialName("p_naam_id") val naamId: String)
+    @Serializable private data class CreateNaamArgs(@SerialName("p_id") val id: String, @SerialName("p_name") val name: String)
+    @Serializable private data class StartSessionArgs(
+        @SerialName("p_operation_id") val operationId: String,
+        @SerialName("p_naam_id") val naamId: String
+    )
+    @Serializable private data class SessionActionArgs(
+        @SerialName("p_session_id") val sessionId: String,
+        @SerialName("p_operation_id") val operationId: String,
+        @SerialName("p_action") val action: String,
+        @SerialName("p_timezone") val timeZone: String
+    )
+    @Serializable private data class CreateRecordArgs(
+        @SerialName("p_id") val id: String,
+        @SerialName("p_naam_id") val naamId: String,
+        @SerialName("p_count") val count: Long,
+        @SerialName("p_record_date") val recordDate: String,
+        @SerialName("p_notes") val notes: String?
+    )
+    @Serializable private data class DailyGoalArgs(@SerialName("p_target_count") val targetCount: Long)
+    @Serializable private data class SessionIdsArgs(@SerialName("p_session_ids") val sessionIds: List<String>)
+    @Serializable private data class SessionIdArgs(@SerialName("p_session_id") val sessionId: String)
+
+    @Serializable private data class NaamTypeRow(
+        val id: String,
+        val name: String,
+        @SerialName("is_default") val isDefault: Boolean? = false
+    ) { fun toDomain() = NaamType(id, name, isDefault == true) }
+
+    @Serializable private data class NaamTypeDeleteCheckRow(
+        val id: String,
+        @SerialName("is_default") val isDefault: Boolean?
+    )
+    @Serializable private data class NaamTypeReferenceRow(val id: String)
+
+    @Serializable private data class SessionRow(
+        val id: String,
+        @SerialName("naam_id") val naamId: String,
+        val count: Long,
+        @SerialName("started_at") val startedAt: String,
+        @SerialName("ended_at") val endedAt: String? = null
+    ) {
+        fun toDomain(names: Map<String, String>, duration: SessionDuration) = ActiveJapSession(
+            id, naamId, names[naamId] ?: "Naam", count, startedAt.toInstantOrUtc(),
+            endedAt?.toInstantOrUtc(), duration.seconds, duration.paused
+        )
+    }
+
+    @Serializable private data class SessionDurationRow(
+        @SerialName("session_id") val sessionId: String,
+        @SerialName("duration_seconds") val durationSeconds: Long,
+        @SerialName("is_paused") val isPaused: Boolean?
+    )
+    @Serializable private data class RecordDeleteCheckRow(
+        val id: String,
+        @SerialName("session_id") val sessionId: String?
+    )
+    private data class SessionDuration(val seconds: Long, val paused: Boolean)
+
+    @Serializable private data class RecordRow(
+        val id: String,
+        @SerialName("naam_id") val naamId: String,
+        val count: Long,
+    @SerialName("record_date") val recordDate: String,
+    val notes: String? = null,
+    @SerialName("created_at") val createdAt: String,
+    @SerialName("session_id") val sessionId: String? = null
+)
+    @Serializable private data class DailyGoalRow(
+        val id: String,
+        @SerialName("target_count") val targetCount: Long
+    )
+}
+
+private fun String.toInstantOrUtc(): Instant = runCatching { Instant.parse(this) }
+    .getOrElse { OffsetDateTime.parse(this).toInstant() }

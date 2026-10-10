@@ -4,6 +4,8 @@ import com.naamjap.app.data.remote.SupabaseProvider
 import com.naamjap.app.domain.model.AccountIdentity
 import com.naamjap.app.domain.repository.AuthRepository
 import com.naamjap.app.domain.repository.AuthSessionState
+import com.naamjap.app.notifications.NotificationEvents
+import com.naamjap.app.notifications.NotificationEventKind
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.builtin.Email
 import io.github.jan.supabase.auth.status.SessionStatus
@@ -19,7 +21,8 @@ import kotlinx.serialization.json.put
 
 @Singleton
 class SupabaseAuthRepository @Inject constructor(
-    private val provider: SupabaseProvider
+    private val provider: SupabaseProvider,
+    private val notificationEvents: NotificationEvents
 ) : AuthRepository {
     override val isConfigured: Boolean
         get() = provider.client != null
@@ -79,7 +82,12 @@ class SupabaseAuthRepository @Inject constructor(
     }
 
     override suspend fun updatePassword(password: String) {
-        client().auth.updateUser { this.password = password }
+        val auth = client().auth
+        val userId = requireNotNull(auth.currentUserOrNull()?.id) { "Sign in again before changing your password." }
+        auth.updateUser { this.password = password }
+        if (auth.currentUserOrNull()?.id == userId) {
+            notificationEvents.publish(userId, NotificationEventKind.PASSWORD_CHANGED, java.util.UUID.randomUUID().toString())
+        }
     }
 
     override suspend fun signOut() {

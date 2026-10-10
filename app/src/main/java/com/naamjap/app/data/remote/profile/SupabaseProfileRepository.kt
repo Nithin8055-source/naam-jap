@@ -5,6 +5,8 @@ import com.naamjap.app.data.remote.DatabaseOperationException
 import com.naamjap.app.data.remote.logSafeSupabaseFailure
 import com.naamjap.app.domain.model.UserProfile
 import com.naamjap.app.domain.repository.ProfileRepository
+import com.naamjap.app.notifications.NotificationEvents
+import com.naamjap.app.notifications.NotificationEventKind
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.postgrest
@@ -19,7 +21,8 @@ import kotlinx.serialization.Serializable
 
 @Singleton
 class SupabaseProfileRepository @Inject constructor(
-    private val provider: SupabaseProvider
+    private val provider: SupabaseProvider,
+    private val notificationEvents: NotificationEvents
 ) : ProfileRepository {
     override suspend fun getCurrentProfile(): UserProfile {
         val client = client()
@@ -37,13 +40,15 @@ class SupabaseProfileRepository @Inject constructor(
         require(normalizedName.length in 2..80) { "Enter a name between 2 and 80 characters." }
         val normalizedAvatar = avatarUrl?.trim()?.takeIf(String::isNotEmpty)
         require(normalizedAvatar == null || normalizedAvatar.length <= 2048) { "Avatar URL is too long." }
+        val userId = currentUserId()
         traced("profiles.update") {
             client().from("profiles").update(
                 ProfileUpdate(displayName = normalizedName, avatarUrl = normalizedAvatar)
             ) {
-                filter { eq("id", currentUserId()) }
+                filter { eq("id", userId) }
             }
         }
+        notificationEvents.publish(userId, NotificationEventKind.PROFILE_CHANGED, java.util.UUID.randomUUID().toString())
     }
 
     override suspend fun deleteCurrentAccount() {

@@ -1,16 +1,14 @@
 package com.naamjap.app.feature.jap
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.rememberScrollState
@@ -29,6 +27,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -39,14 +38,15 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.naamjap.app.ui.components.navigationContentBottomInset
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
@@ -213,11 +213,16 @@ fun JapScreen(viewModel: JapViewModel = hiltViewModel()) {
         }
     }
     val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
     val countInteraction = remember { MutableInteractionSource() }
     val countPressed by countInteraction.collectIsPressedAsState()
     val countScale by androidx.compose.animation.core.animateFloatAsState(if (countPressed) .96f else 1f, label = "count button press")
     val haptics = LocalHapticFeedback.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var isAppResumed by remember(lifecycleOwner) {
+        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+    }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { isAppResumed = true }
+    LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) { isAppResumed = false }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refresh() }
     PremiumPullToRefreshBox(
         isRefreshing = isUserRefreshing,
@@ -231,74 +236,104 @@ fun JapScreen(viewModel: JapViewModel = hiltViewModel()) {
             Text("Naam Jap", style = MaterialTheme.typography.headlineMedium)
             Spacer(Modifier.height(JapSpacing.xs))
             Text(if (active == null) "Your default naam is ready" else if (active.isPaused) "Paused" else "Session in progress", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(JapSpacing.xxl))
-            Box(Modifier.size(300.dp), contentAlignment = Alignment.Center) {
-                Image(painterResource(R.drawable.ic_sacred_halo), null, Modifier.fillMaxSize().alpha(.13f), contentScale = ContentScale.Fit)
-                AnimatedNaamRing(Modifier.size(272.dp), strokeWidth = 5.dp) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        AnimatedContent(targetState = formattedCount, label = "session count") {
+            Spacer(Modifier.height(JapSpacing.xl))
+            BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                val ringSize = maxWidth.coerceAtMost(272.dp)
+                // Reclaim the column's horizontal padding for decoration so a narrow
+                // screen still has room for petals outside the unchanged counter ring.
+                val flowerSize = (ringSize * 1.35f).coerceAtMost(maxWidth + JapSpacing.xl * 2f)
+                Box(Modifier.requiredSize(flowerSize), contentAlignment = Alignment.Center) {
+                    LotusCounterFrame(
+                        ringDiameter = ringSize,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    Image(
+                        painter = painterResource(R.drawable.ic_sacred_halo),
+                        contentDescription = null,
+                        modifier = Modifier.size(ringSize * 0.9f).alpha(0.2f),
+                        contentScale = ContentScale.Fit
+                    )
+                    AnimatedNaamRing(
+                        Modifier.size(ringSize),
+                        strokeWidth = 5.dp,
+                        isActive = isAppResumed && active != null && !active.isPaused && active.endedAt == null
+                    ) {
+                        val countFontSize = when {
+                            formattedCount.length > 16 -> 15.sp
+                            formattedCount.length > 12 -> 20.sp
+                            formattedCount.length > 9 -> 26.sp
+                            formattedCount.length > 7 -> 32.sp
+                            formattedCount.length > 5 -> 42.sp
+                            else -> 52.sp
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            LotusMark(Modifier.size(44.dp).offset(y = (-5).dp), null)
+                            AnimatedContent(
+                                targetState = formattedCount,
+                                modifier = Modifier.fillMaxWidth(.9f).height(62.dp),
+                                contentAlignment = Alignment.Center,
+                                label = "session count"
+                            ) { count ->
+                                Text(
+                                    count,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    style = MaterialTheme.typography.displayLarge.copy(
+                                        fontSize = countFontSize,
+                                        lineHeight = (countFontSize.value * 1.1f).sp,
+                                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                                        fontFeatureSettings = "tnum"
+                                    ),
+                                    textAlign = TextAlign.Center,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+                            Text("Naam Jap", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text(
-                                it,
-                                style = when {
-                                    formattedCount.length >= 14 -> MaterialTheme.typography.titleSmall
-                                    formattedCount.length >= 9 -> MaterialTheme.typography.titleMedium
-                                    formattedCount.length >= 6 -> MaterialTheme.typography.headlineSmall
-                                    else -> MaterialTheme.typography.displayLarge
-                                },
-                                maxLines = 1
+                                active?.naamName ?: defaultNaam?.name ?: "Add a naam in Settings",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.offset(y = 6.dp),
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                             )
                         }
-                        Text("Naam Jap", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(
-                            active?.naamName ?: defaultNaam?.name ?: "Add a naam in Settings",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            softWrap = false,
-                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                        )
                     }
                 }
             }
             Spacer(Modifier.height(JapSpacing.sm))
             Text("A calm space for your practice", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(JapSpacing.xxl))
-            Box(Modifier.size(112.dp), contentAlignment = Alignment.Center) {
-                Box(
-                    Modifier.fillMaxSize().background(
-                        Brush.radialGradient(
-                            listOf(MaterialTheme.colorScheme.primary.copy(alpha = .28f), MaterialTheme.colorScheme.primary.copy(alpha = .10f), Color.Transparent)
-                        ),
-                        CircleShape
-                    )
-                )
-                Button(
-                    onClick = { active?.let { haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove); viewModel.increment(it.id) } },
-                    enabled = active != null && !active.isPaused && !data.isSaving && !isSessionActionPending,
-                    interactionSource = countInteraction,
-                    modifier = Modifier.size(84.dp).scale(countScale).shadow(8.dp, CircleShape, clip = false),
-                    shape = CircleShape,
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
-                ) {
-                    LotusMark(Modifier.size(34.dp), "Add one Naam Jap")
-                }
-            }
-            Spacer(Modifier.height(JapSpacing.xs))
-            Text(if (active == null) "Start a session to count" else "Tap to add one repetition", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(JapSpacing.lg))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+            Spacer(Modifier.height(JapSpacing.xl))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
                 SessionActionControl(
                     icon = Icons.Default.Replay,
                     label = "Undo",
-                    enabled = active != null && active.count > 0 && !data.isSaving && !isSessionActionPending,
+                    enabled = active != null && displayedCount > 0 && !isSessionActionPending,
                     onClick = { active?.let { viewModel.action(it.id, com.naamjap.app.domain.repository.SessionAction.UNDO) } }
                 )
-                Spacer(Modifier.width(JapSpacing.xxxl))
+                Button(
+                    onClick = { active?.let { haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove); viewModel.increment(it.id) } },
+                    enabled = active != null && !active.isPaused && !isSessionActionPending,
+                    interactionSource = countInteraction,
+                    modifier = Modifier.size(76.dp).scale(countScale).shadow(5.dp, CircleShape, clip = false),
+                    shape = CircleShape,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        disabledContainerColor = MaterialTheme.colorScheme.primary
+                    ),
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        MaterialTheme.colorScheme.onPrimary.copy(alpha = .22f)
+                    ),
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp, pressedElevation = 2.dp, focusedElevation = 2.dp, hoveredElevation = 2.dp)
+                ) {
+                    LotusMark(Modifier.size(34.dp), "Add one Naam Jap")
+                }
                 SessionActionControl(
                     icon = if (active?.isPaused == true) Icons.Default.PlayArrow else Icons.Default.Pause,
                     label = if (active?.isPaused == true) "Resume" else "Pause",
-                    enabled = active != null && !data.isSaving && !isSessionActionPending,
+                    enabled = active != null && !isSessionActionPending,
                     onClick = {
                         active?.let {
                             viewModel.action(it.id, if (it.isPaused) com.naamjap.app.domain.repository.SessionAction.RESUME else com.naamjap.app.domain.repository.SessionAction.PAUSE)
@@ -306,30 +341,68 @@ fun JapScreen(viewModel: JapViewModel = hiltViewModel()) {
                     }
                 )
             }
+            Spacer(Modifier.height(JapSpacing.xs))
+            Text(if (active == null) "Start a session to count" else "Tap to add one repetition", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(JapSpacing.xl))
             GlassSurface(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(JapSpacing.md)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(JapSpacing.md)) {
-                        Box(Modifier.size(48.dp).background(MaterialTheme.colorScheme.primary.copy(alpha = .12f), CircleShape), contentAlignment = Alignment.Center) {
-                            LotusMark(Modifier.size(30.dp), null)
+                val shownCount = maxOf(active?.count ?: 0L, optimisticCount?.takeIf { it.sessionId == active?.id }?.target ?: 0L)
+                Column(Modifier.padding(horizontal = JapSpacing.md, vertical = JapSpacing.sm), verticalArrangement = Arrangement.spacedBy(JapSpacing.xs)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(JapSpacing.sm)) {
+                        Image(
+                            painter = painterResource(R.drawable.mala_beads),
+                            contentDescription = "Mala beads",
+                            modifier = Modifier.size(42.dp).clip(CircleShape).border(
+                                1.dp,
+                                MaterialTheme.colorScheme.primary.copy(alpha = .38f),
+                                CircleShape
+                            ),
+                            contentScale = ContentScale.Crop
+                        )
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                "CURRENT SESSION",
+                                style = MaterialTheme.typography.labelSmall.copy(letterSpacing = .8.sp),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                active?.naamName ?: "Ready to begin",
+                                style = MaterialTheme.typography.titleSmall,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                            )
+                            Text(
+                                if (active == null) "No active session" else formatElapsed(liveDurationSeconds),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
-                        Column(Modifier.weight(1f)) {
-                            Text(active?.naamName ?: "Start a session", style = MaterialTheme.typography.titleMedium)
-                            val shownCount = maxOf(active?.count ?: 0L, optimisticCount?.takeIf { it.sessionId == active?.id }?.target ?: 0L)
-                            Text(if (active == null) "No active session" else "${formatElapsed(liveDurationSeconds)} · ${com.naamjap.app.ui.components.formatCount(shownCount)} Naam Jap", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            if (active == null) {
-                                if (defaultNaam != null) {
-                                    TextButton(onClick = { viewModel.start(defaultNaam.id) }) {
-                                        Text("Start ${defaultNaam.name}", maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                                    }
-                                }
-                            } else {
-                                TextButton(
-                                    onClick = { viewModel.action(active.id, com.naamjap.app.domain.repository.SessionAction.FINISH) },
-                                    enabled = !data.isSaving && !isSessionActionPending && (optimisticCount?.takeIf { it.sessionId == active.id }?.target ?: active.count) <= active.count
-                                ) { Text("Finish session") }
-                            }
+                        Box(Modifier.width(1.dp).height(40.dp).background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = .8f)))
+                        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            val countLabel = com.naamjap.app.ui.components.formatCount(shownCount)
+                            Text(
+                                countLabel,
+                                style = when {
+                                    countLabel.length > 13 -> MaterialTheme.typography.labelSmall
+                                    countLabel.length > 9 -> MaterialTheme.typography.labelLarge
+                                    else -> MaterialTheme.typography.titleMedium
+                                }.copy(fontFeatureSettings = "tnum"),
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                            Text("counts", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
+                    }
+                    if (active == null && defaultNaam != null) {
+                        TextButton(onClick = { viewModel.start(defaultNaam.id) }, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)) {
+                            Text("Start ${defaultNaam.name}", maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                        }
+                    } else if (active != null) {
+                        TextButton(
+                            onClick = { viewModel.action(active.id, com.naamjap.app.domain.repository.SessionAction.FINISH) },
+                            enabled = !data.isSaving && !isSessionActionPending && (optimisticCount?.takeIf { it.sessionId == active.id }?.target ?: active.count) <= active.count,
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                        ) { Text("Finish session") }
                     }
                 }
             }
@@ -352,15 +425,20 @@ private fun PreviewControl(label: String, icon: androidx.compose.ui.graphics.vec
 private fun AnimatedNaamRing(
     modifier: Modifier = Modifier,
     strokeWidth: androidx.compose.ui.unit.Dp,
+    isActive: Boolean,
     content: @Composable BoxScope.() -> Unit
 ) {
-    val transition = rememberInfiniteTransition(label = "naam ring light")
-    val rotation by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(tween(4_200, easing = LinearEasing), RepeatMode.Restart),
-        label = "revolving ring light"
-    )
+    val rotation = remember { Animatable(0f) }
+    LaunchedEffect(isActive) {
+        if (isActive) {
+            while (true) {
+                val remainingDegrees = (360f - rotation.value).coerceAtLeast(1f)
+                val remainingDuration = (10_000 * remainingDegrees / 360f).toInt().coerceAtLeast(1)
+                rotation.animateTo(360f, tween(remainingDuration, easing = LinearEasing))
+                rotation.snapTo(0f)
+            }
+        }
+    }
     val trackColor = MaterialTheme.colorScheme.secondary
     val lightColor = MaterialTheme.colorScheme.primary
     Box(modifier, contentAlignment = Alignment.Center) {
@@ -368,34 +446,40 @@ private fun AnimatedNaamRing(
             val stroke = strokeWidth.toPx()
             val radius = size.minDimension / 2f - stroke / 2f
             val center = Offset(size.width / 2f, size.height / 2f)
-            drawCircle(trackColor.copy(alpha = .24f), radius, center, style = Stroke(stroke))
-            val ringBrush = Brush.sweepGradient(
-                colors = listOf(
-                    Color.Transparent,
-                    lightColor.copy(alpha = .18f),
-                    trackColor.copy(alpha = .72f),
-                    Color.White.copy(alpha = .96f),
-                    lightColor.copy(alpha = .4f),
-                    Color.Transparent
-                ),
-                center = center
-            )
-            rotate(rotation, center) {
-                drawCircle(brush = ringBrush, radius = radius, center = center, style = Stroke(stroke))
+            drawCircle(trackColor.copy(alpha = .48f), radius, center, style = Stroke(stroke))
+            if (isActive) {
+                val angle = Math.toRadians((rotation.value - 90f).toDouble()).toFloat()
+                val lightCenter = Offset(center.x + radius * cos(angle), center.y + radius * sin(angle))
+                val haloRadius = 28.dp.toPx()
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = .12f),
+                            lightColor.copy(alpha = .11f),
+                            Color.Transparent
+                        ),
+                        center = lightCenter,
+                        radius = haloRadius
+                    ),
+                    radius = haloRadius,
+                    center = lightCenter
+                )
+                val glowRadius = 12.dp.toPx()
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = .62f),
+                            lightColor.copy(alpha = .28f),
+                            Color.Transparent
+                        ),
+                        center = lightCenter,
+                        radius = glowRadius
+                    ),
+                    radius = glowRadius,
+                    center = lightCenter
+                )
+                drawCircle(Color.White.copy(alpha = .96f), radius = 2.2.dp.toPx(), center = lightCenter)
             }
-            val angle = Math.toRadians((rotation - 90f).toDouble()).toFloat()
-            val lightCenter = Offset(center.x + radius * cos(angle), center.y + radius * sin(angle))
-            val glowRadius = 24.dp.toPx()
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(Color.White.copy(alpha = .72f), lightColor.copy(alpha = .34f), Color.Transparent),
-                    center = lightCenter,
-                    radius = glowRadius
-                ),
-                radius = glowRadius,
-                center = lightCenter
-            )
-            drawCircle(Color.White.copy(alpha = .94f), radius = 3.dp.toPx(), center = lightCenter)
         }
         content()
     }
@@ -412,8 +496,9 @@ private fun SessionActionControl(
         IconButton(
             onClick = onClick,
             enabled = enabled,
-            modifier = Modifier.size(52.dp).shadow(3.dp, CircleShape).clip(CircleShape)
+            modifier = Modifier.size(52.dp).shadow(2.dp, CircleShape).clip(CircleShape)
                 .background(MaterialTheme.colorScheme.surface)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
         ) {
             Icon(
                 imageVector = icon,

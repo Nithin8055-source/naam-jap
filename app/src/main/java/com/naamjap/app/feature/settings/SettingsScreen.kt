@@ -24,6 +24,9 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -48,6 +51,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import com.naamjap.app.notifications.NotificationPreferences
+import com.naamjap.app.notifications.NotificationPreferencesRepository
 
 data class SettingsUiState(
     val displayName: String = "",
@@ -66,15 +71,51 @@ class SettingsViewModel @Inject constructor(
     private val profiles: com.naamjap.app.domain.repository.ProfileRepository,
     private val practice: PracticeRepository,
     private val auth: com.naamjap.app.domain.repository.AuthRepository,
-    private val networkStatus: NetworkStatus
+    private val networkStatus: NetworkStatus,
+    private val notificationPreferencesRepository: NotificationPreferencesRepository
 ) : ViewModel() {
     val data = practice.state
     private val _state = MutableStateFlow(SettingsUiState())
     val state: StateFlow<SettingsUiState> = _state
+    val notificationPreferences = notificationPreferencesRepository.preferences
     private var refreshJob: kotlinx.coroutines.Job? = null
 
     init {
         refresh()
+    }
+
+    fun setNotificationsEnabled(value: Boolean) = persistNotificationPreference { setEnabled(value) }
+    fun setSessionNotifications(value: Boolean) = persistNotificationPreference { setSessions(value) }
+    fun setDailyReminder(value: Boolean) = persistNotificationPreference { setDailyReminder(value) }
+    fun setActivityNotifications(value: Boolean) = persistNotificationPreference { setActivity(value) }
+    fun setAccountNotifications(value: Boolean) = persistNotificationPreference { setAccount(value) }
+    fun setReminderTime(hour: Int, minute: Int) = viewModelScope.launch {
+        try {
+            notificationPreferencesRepository.setReminderTime(hour, minute)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            _state.value = _state.value.copy(error = "Notification settings could not be saved.")
+        }
+    }
+    fun markNotificationPermissionPromptAttempted() = viewModelScope.launch {
+        try {
+            notificationPreferencesRepository.markPermissionPromptAttempted()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            _state.value = _state.value.copy(error = "Notification permission preference could not be saved.")
+        }
+    }
+
+    private fun persistNotificationPreference(action: suspend NotificationPreferencesRepository.() -> Unit) = viewModelScope.launch {
+        try {
+            notificationPreferencesRepository.action()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            _state.value = _state.value.copy(error = "Notification settings could not be saved.")
+        }
     }
 
     fun refresh(userInitiated: Boolean = false) {
@@ -192,6 +233,32 @@ private fun SettingsScreenPreview() {
 }
 
 @Composable
+private fun NotificationSettingSwitchRow(
+    title: String,
+    description: String,
+    checked: Boolean,
+    enabled: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = JapSpacing.xs),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(JapSpacing.sm)
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyMedium)
+            Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            enabled = enabled,
+            modifier = Modifier.semantics { contentDescription = title }
+        )
+    }
+}
+
+@Composable
 fun SettingsScreen(
     themeChoice: ThemeChoice,
     onThemeChoice: (ThemeChoice) -> Unit,
@@ -201,6 +268,14 @@ fun SettingsScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val practice by viewModel.data.collectAsStateWithLifecycle()
+    val notificationPreferences by viewModel.notificationPreferences.collectAsStateWithLifecycle(
+        initialValue = NotificationPreferences()
+    )
+    val context = LocalContext.current
+    var notificationsAllowed by remember { mutableStateOf(androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()) }
+    val notificationPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { granted -> notificationsAllowed = granted && androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled() }
     var confirmSignOut by rememberSaveable { mutableStateOf(false) }
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
     var deleteNaamTarget by remember { mutableStateOf<NaamType?>(null) }
@@ -237,7 +312,10 @@ fun SettingsScreen(
         }
     }
 
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refresh() }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        viewModel.refresh()
+        notificationsAllowed = androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()
+    }
     PremiumPullToRefreshBox(
         isRefreshing = state.isUserRefreshing,
         onRefresh = { viewModel.refresh(userInitiated = true) },
@@ -356,13 +434,110 @@ fun SettingsScreen(
                 }
             }
             SettingDivider()
-            SettingRow(
-                icon = Icons.Default.NotificationsNone,
-                title = "Reminders & notifications",
-                value = "Not configured",
-                onClick = {},
-                enabled = false
-            )
+            Column(Modifier.fillMaxWidth().padding(horizontal = JapSpacing.md, vertical = JapSpacing.sm)) {
+                Text("Notifications", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Receive reminders and important Naam Jap updates.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(JapSpacing.sm))
+                NotificationSettingSwitchRow(
+                    title = "Notifications",
+                    description = "Receive reminders and updates",
+                    checked = notificationPreferences.enabled,
+                    enabled = true,
+                    onCheckedChange = { enable ->
+                        viewModel.setNotificationsEnabled(enable)
+                        val needsRuntimePermission = android.os.Build.VERSION.SDK_INT >= 33 &&
+                            androidx.core.content.ContextCompat.checkSelfPermission(
+                                context,
+                                android.Manifest.permission.POST_NOTIFICATIONS
+                            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                        if (enable && needsRuntimePermission && !notificationPreferences.permissionPromptAttempted) {
+                            viewModel.markNotificationPermissionPromptAttempted()
+                            notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                    }
+                )
+                NotificationSettingSwitchRow(
+                    title = "Jap session notifications",
+                    description = "Show the active session count and pause status",
+                    checked = notificationPreferences.sessions,
+                    enabled = notificationPreferences.enabled,
+                    onCheckedChange = viewModel::setSessionNotifications
+                )
+                NotificationSettingSwitchRow(
+                    title = "Daily Naam Jap reminder",
+                    description = "A reminder at your chosen local time",
+                    checked = notificationPreferences.dailyReminder,
+                    enabled = notificationPreferences.enabled,
+                    onCheckedChange = viewModel::setDailyReminder
+                )
+                if (notificationPreferences.enabled && notificationPreferences.dailyReminder) {
+                    val reminderClock = java.util.Calendar.getInstance().apply {
+                        set(java.util.Calendar.HOUR_OF_DAY, notificationPreferences.reminderHour)
+                        set(java.util.Calendar.MINUTE, notificationPreferences.reminderMinute)
+                    }.time
+                    Row(
+                        Modifier.fillMaxWidth().padding(start = JapSpacing.md),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Reminder time", style = MaterialTheme.typography.bodyMedium)
+                        TextButton(onClick = {
+                            android.app.TimePickerDialog(
+                                context,
+                                { _, hour, minute -> viewModel.setReminderTime(hour, minute) },
+                                notificationPreferences.reminderHour,
+                                notificationPreferences.reminderMinute,
+                                android.text.format.DateFormat.is24HourFormat(context)
+                            ).show()
+                        }) {
+                            Text(android.text.format.DateFormat.getTimeFormat(context).format(reminderClock))
+                        }
+                    }
+                    Text(
+                        "Uses your device's local time. Android may delay delivery to save battery.",
+                        Modifier.padding(start = JapSpacing.md),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                NotificationSettingSwitchRow(
+                    title = "Activity and record updates",
+                    description = "Manual records, default Naam, and daily goal changes",
+                    checked = notificationPreferences.activity,
+                    enabled = notificationPreferences.enabled,
+                    onCheckedChange = viewModel::setActivityNotifications
+                )
+                NotificationSettingSwitchRow(
+                    title = "Account and settings updates",
+                    description = "Password and profile name confirmations",
+                    checked = notificationPreferences.account,
+                    enabled = notificationPreferences.enabled,
+                    onCheckedChange = viewModel::setAccountNotifications
+                )
+                if (notificationPreferences.enabled && !notificationsAllowed) {
+                    Text(
+                        "System notifications are disabled. Allow them in Android Settings; your notification preferences are saved.",
+                        Modifier.padding(top = JapSpacing.xs),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    TextButton(onClick = {
+                        val settingsIntent = android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                            .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+                        runCatching { context.startActivity(settingsIntent) }
+                    }) { Text("Open notification settings") }
+                } else if (notificationPreferences.enabled) {
+                    TextButton(onClick = {
+                        val settingsIntent = android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                            .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+                        runCatching { context.startActivity(settingsIntent) }
+                    }) { Text("Manage notification channels") }
+                }
+            }
             SettingDivider()
             SettingRow(
                 icon = Icons.Default.LightMode,
@@ -380,7 +555,7 @@ fun SettingsScreen(
             SettingDivider()
             SettingRow(Icons.Default.Cloud, "Backup & Sync", "Supabase account sync", onClick = {}, enabled = false)
             SettingDivider()
-            SettingRow(Icons.Default.Info, "About Naam Jap", "Version 1.0.0", onClick = {}, enabled = false)
+            SettingRow(Icons.Default.Info, "About Naam Jap", "Version v1.0.2", onClick = {}, enabled = false)
         }
 
         GlassSurface(Modifier.fillMaxWidth()) {
@@ -407,15 +582,44 @@ fun SettingsScreen(
                     else {
                         practice.naamTypes.forEach { naam ->
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                SettingRow(
-                                    icon = if (naam.isDefault) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
-                                    title = naam.name,
-                                    value = if (naam.isDefault) "Default · used for new sessions" else "Personal",
-                                    onClick = { if (!naam.isDefault && !state.isSaving) viewModel.setDefaultNaam(naam.id) },
-                                    enabled = !state.isSaving,
-                                    showChevron = false,
-                                    modifier = Modifier.weight(1f)
-                                )
+                                Row(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .heightIn(min = 64.dp)
+                                        .clip(MaterialTheme.shapes.medium)
+                                        .clickable(enabled = !state.isSaving) {
+                                            if (!naam.isDefault) viewModel.setDefaultNaam(naam.id)
+                                        }
+                                        .padding(horizontal = JapSpacing.sm, vertical = JapSpacing.xs),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(JapSpacing.sm)
+                                ) {
+                                    Icon(
+                                        imageVector = if (naam.isDefault) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                                        contentDescription = if (naam.isDefault) "Default Naam" else "Select ${naam.name}",
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                                    ) {
+                                        Text(
+                                            text = naam.name,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = if (naam.isDefault) "Default · used for new sessions" else "Personal",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            softWrap = false,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
                                 if (practice.naamTypes.size > 1) {
                                     IconButton(onClick = { deleteNaamTarget = naam; naamDeletePassword = "" }, enabled = !state.isSaving) {
                                         Icon(Icons.Default.DeleteOutline, contentDescription = "Delete ${naam.name}", tint = MaterialTheme.colorScheme.error)

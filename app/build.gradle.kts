@@ -34,13 +34,13 @@ if (supabasePublishableKey.isNotEmpty() && !supabasePublishableKey.startsWith("s
 
 android {
     namespace = "com.naamjap.app"
-    compileSdk = 36
+    compileSdk = 37
     defaultConfig {
         applicationId = "com.naamjap.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.0.2"
         buildConfigField("String", "SUPABASE_URL", buildConfigString(supabaseUrl))
         buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", buildConfigString(supabasePublishableKey))
     }
@@ -68,6 +68,7 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.datastore.preferences)
+    implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.haze)
     implementation(libs.haze.blur)
     implementation(platform(libs.supabase.bom))

@@ -1,0 +1,12 @@
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="180dp"
+    android:minHeight="128dp"
+    android:minResizeWidth="150dp"
+    android:minResizeHeight="120dp"
+    android:targetCellWidth="2"
+    android:targetCellHeight="2"
+    android:resizeMode="horizontal|vertical"
+    android:initialLayout="@layout/widget_naam_jap_2x2"
+    android:previewImage="@drawable/ic_naam_jap_logo"
+    android:widgetCategory="home_screen"
+    android:updatePeriodMillis="0" />

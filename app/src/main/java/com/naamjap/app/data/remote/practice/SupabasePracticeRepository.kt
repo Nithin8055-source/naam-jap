@@ -13,6 +13,8 @@ import com.naamjap.app.domain.repository.PracticeDataState
 import com.naamjap.app.domain.repository.PracticeHistoryItem
 import com.naamjap.app.domain.repository.PracticeRepository
 import com.naamjap.app.domain.repository.SessionAction
+import com.naamjap.app.notifications.NotificationEvents
+import com.naamjap.app.notifications.NotificationEventKind
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.postgrest.from
@@ -47,7 +49,8 @@ import kotlinx.serialization.Serializable
 @Singleton
 class SupabasePracticeRepository @Inject constructor(
     private val provider: SupabaseProvider,
-    private val networkStatus: NetworkStatus
+    private val networkStatus: NetworkStatus,
+    private val notificationEvents: NotificationEvents
 ) : PracticeRepository {
     private val _state = MutableStateFlow(PracticeDataState())
     override val state: StateFlow<PracticeDataState> = _state.asStateFlow()
@@ -204,6 +207,7 @@ class SupabasePracticeRepository @Inject constructor(
     }
 
     override suspend fun setDefaultNaamType(id: String): NaamType = actionMutex.withLock {
+        val userId = currentUserId()
         val row = traced("rpc.set_default_naam_type") { client().postgrest.rpc("set_default_naam_type", NaamIdArgs(id)).decodeList<NaamTypeRow>().single() }
         refreshAfterWrite()
         val selected = row.toDomain()
@@ -215,11 +219,13 @@ class SupabasePracticeRepository @Inject constructor(
             message = "Default Naam updated.",
             error = null
         )
+        notificationEvents.publish(userId, NotificationEventKind.DEFAULT_NAAM_CHANGED, id)
         selected
     }
 
     override suspend fun deleteNaamType(id: String) = actionMutex.withLock {
         val userId = currentUserId()
+        var replacementDefaultId: String? = null
         setSaving()
         try {
             val selected = traced("naam_type.delete_check") {
@@ -263,6 +269,7 @@ class SupabasePracticeRepository @Inject constructor(
                     client().postgrest.rpc("set_default_naam_type", NaamIdArgs(replacement.id))
                         .decodeList<NaamTypeRow>().single()
                 }.toDomain()
+                replacementDefaultId = newDefault.id
                 _state.value = _state.value.copy(
                     naamTypes = _state.value.naamTypes.map { it.copy(isDefault = it.id == newDefault.id) },
                     message = "Default Naam updated.",
@@ -280,6 +287,9 @@ class SupabasePracticeRepository @Inject constructor(
                 "The delete was not confirmed by Supabase. Refresh and try again."
             }
             _state.value = _state.value.copy(message = "Naam type deleted.", error = null, isSaving = false)
+            replacementDefaultId?.let {
+                notificationEvents.publish(userId, NotificationEventKind.DEFAULT_NAAM_CHANGED, "deleted-$id-default-$it")
+            }
         } catch (cancelled: CancellationException) {
             _state.value = _state.value.copy(isSaving = false)
             throw cancelled
@@ -307,8 +317,18 @@ class SupabasePracticeRepository @Inject constructor(
             }
             pendingStart = null
             refreshAfterWrite()
-            _state.value = _state.value.copy(message = "Session saved to your account.", error = null)
-            _state.value.activeSession ?: row.toDomain(_state.value.naamTypes.associate { it.id to it.name }, SessionDuration(0, false))
+            val activeSession = _state.value.activeSession?.takeIf { it.id == row.id }
+                ?: row.toDomain(
+                    _state.value.naamTypes.associate { it.id to it.name },
+                    SessionDuration(0, false)
+                )
+            _state.value = _state.value.copy(
+                activeSession = activeSession,
+                isSaving = false,
+                message = "Session saved to your account.",
+                error = null
+            )
+            activeSession
         } catch (cancelled: CancellationException) {
             _state.value = _state.value.copy(isSaving = false)
             throw cancelled
@@ -319,6 +339,7 @@ class SupabasePracticeRepository @Inject constructor(
     }
 
     override suspend fun applySessionAction(sessionId: String, action: SessionAction, operationId: String): ActiveJapSession = actionMutex.withLock {
+        val finishingUserId = if (action == SessionAction.FINISH) currentUserId() else null
         setSaving()
         try {
             val row = traced("rpc.apply_jap_session_action") {
@@ -347,7 +368,10 @@ class SupabasePracticeRepository @Inject constructor(
                 message = if (action == SessionAction.FINISH) "Session saved to your account." else "Cloud session updated.",
                 error = null
             )
-            if (action == SessionAction.FINISH) refreshAfterWrite()
+            if (action == SessionAction.FINISH) {
+                refreshAfterWrite()
+                finishingUserId?.let { notificationEvents.publish(it, NotificationEventKind.SESSION_FINISHED, operationId) }
+            }
             updated
         } catch (cancelled: CancellationException) {
             _state.value = _state.value.copy(isSaving = false)
@@ -393,6 +417,7 @@ class SupabasePracticeRepository @Inject constructor(
             }
             refreshAfterWrite()
             _state.value = _state.value.copy(message = "Record deleted.", error = null)
+            notificationEvents.publish(userId, NotificationEventKind.RECORD_DELETED, recordId)
         } catch (cancelled: CancellationException) {
             _state.value = _state.value.copy(isSaving = false)
             throw cancelled
@@ -403,6 +428,7 @@ class SupabasePracticeRepository @Inject constructor(
     }
 
     override suspend fun saveManualRecord(record: PracticeRecord, naamId: String, date: LocalDate) = actionMutex.withLock {
+        val userId = currentUserId()
         require(record.count > 0) { "Enter a count greater than zero." }
         val pendingId = pendingRecordIds.getOrPut(record.id) { record.id }
         setSaving()
@@ -422,6 +448,7 @@ class SupabasePracticeRepository @Inject constructor(
             pendingRecordIds.remove(record.id)
             refreshAfterWrite()
             _state.value = _state.value.copy(message = "Record saved to your account.", error = null)
+            notificationEvents.publish(userId, NotificationEventKind.RECORD_ADDED, record.id)
         } catch (cancelled: CancellationException) {
             _state.value = _state.value.copy(isSaving = false)
             throw cancelled
@@ -432,6 +459,7 @@ class SupabasePracticeRepository @Inject constructor(
     }
 
     override suspend fun saveDailyGoal(targetCount: Long) = actionMutex.withLock {
+        val userId = currentUserId()
         require(targetCount in 1..1_000_000_000) { "Daily goal is out of range." }
         setSaving()
         try {
@@ -445,6 +473,7 @@ class SupabasePracticeRepository @Inject constructor(
                 message = "Daily goal saved to your account.",
                 error = null
             )
+            notificationEvents.publish(userId, NotificationEventKind.DAILY_GOAL_CHANGED, java.util.UUID.randomUUID().toString())
         } catch (cancelled: CancellationException) {
             _state.value = _state.value.copy(isSaving = false)
             throw cancelled

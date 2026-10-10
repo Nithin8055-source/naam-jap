@@ -16,9 +16,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -36,18 +37,31 @@ import com.naamjap.app.ui.theme.ThemeChoice
 import javax.inject.Inject
 import io.github.jan.supabase.auth.handleDeeplinks
 import dagger.hilt.android.AndroidEntryPoint
+import com.naamjap.app.widget.EXTRA_WIDGET_OPEN_JAP
+import com.naamjap.app.widget.EXTRA_WIDGET_OPEN_HOME
+import com.naamjap.app.widget.NaamJapWidgetRenderer
+import com.naamjap.app.widget.NaamJapWidgetSnapshotStore
+import com.naamjap.app.widget.NaamJapWidgetWork
+import com.naamjap.app.navigation.EXTRA_NOTIFICATION_OPEN_HOME
+import com.naamjap.app.navigation.EXTRA_NOTIFICATION_OPEN_JAP
+import com.naamjap.app.notifications.NotificationCoordinator
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     private val themePreferenceLoaded = java.util.concurrent.atomic.AtomicBoolean(false)
     private val authDeepLink = mutableStateOf<Uri?>(null)
+    private var widgetJapRequest by mutableIntStateOf(0)
+    private var widgetHomeRequest by mutableIntStateOf(0)
+    private var widgetSessionReady = false
 
     @Inject lateinit var supabaseProvider: SupabaseProvider
+    @Inject lateinit var notificationCoordinator: NotificationCoordinator
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen().setKeepOnScreenCondition { !themePreferenceLoaded.get() }
         super.onCreate(savedInstanceState)
         authDeepLink.value = intent?.data
+        consumeWidgetIntent(intent)
         intent?.let { supabaseProvider.client?.handleDeeplinks(it) }
         enableEdgeToEdge()
         setContent {
@@ -55,6 +69,25 @@ class MainActivity : ComponentActivity() {
             val themeState by themeViewModel.uiState.collectAsStateWithLifecycle()
             val authViewModel: AuthViewModel = hiltViewModel()
             val authSession by authViewModel.sessionState.collectAsStateWithLifecycle()
+            LaunchedEffect(authSession) {
+                when (val session = authSession) {
+                    is AuthSessionState.SignedIn -> {
+                        widgetSessionReady = true
+                        NaamJapWidgetSnapshotStore.clearIfDifferentAccount(this@MainActivity, session.account.userId)
+                        NaamJapWidgetRenderer.updateAll(this@MainActivity)
+                        NaamJapWidgetWork.schedulePeriodicRefresh(this@MainActivity)
+                        NaamJapWidgetWork.enqueueRefresh(this@MainActivity)
+                    }
+                    AuthSessionState.SignedOut,
+                    AuthSessionState.SessionUnavailable,
+                    AuthSessionState.ConfigurationMissing -> {
+                        widgetSessionReady = false
+                        NaamJapWidgetSnapshotStore.clear(this@MainActivity)
+                        NaamJapWidgetRenderer.updateAll(this@MainActivity)
+                    }
+                    AuthSessionState.Checking -> Unit
+                }
+            }
             var showOpeningWallpaper by rememberSaveable { mutableStateOf(savedInstanceState == null) }
             var openingStartedAt by rememberSaveable { mutableLongStateOf(0L) }
             val themeChoice = if (themeState.isLoaded) themeState.choice else ThemeChoice.SYSTEM
@@ -106,7 +139,9 @@ class MainActivity : ComponentActivity() {
                                 themeChoice = themeChoice,
                                 onThemeChoice = themeViewModel::selectTheme,
                                 account = (authSession as AuthSessionState.SignedIn).account,
-                                onSignOut = authViewModel::signOut
+                                onSignOut = authViewModel::signOut,
+                                openJapRequest = widgetJapRequest,
+                                openHomeRequest = widgetHomeRequest
                             )
                             else -> AuthScreen(viewModel = authViewModel)
                         }
@@ -120,6 +155,32 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         authDeepLink.value = intent.data
+        consumeWidgetIntent(intent)
         supabaseProvider.client?.handleDeeplinks(intent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        notificationCoordinator.onForeground()
+        if (widgetSessionReady) NaamJapWidgetWork.enqueueRefresh(this)
+    }
+
+    private fun consumeWidgetIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra(EXTRA_WIDGET_OPEN_JAP, false) == true) {
+            widgetJapRequest++
+            intent.removeExtra(EXTRA_WIDGET_OPEN_JAP)
+        }
+        if (intent?.getBooleanExtra(EXTRA_WIDGET_OPEN_HOME, false) == true) {
+            widgetHomeRequest++
+            intent.removeExtra(EXTRA_WIDGET_OPEN_HOME)
+        }
+        if (intent?.getBooleanExtra(EXTRA_NOTIFICATION_OPEN_JAP, false) == true) {
+            widgetJapRequest++
+            intent.removeExtra(EXTRA_NOTIFICATION_OPEN_JAP)
+        }
+        if (intent?.getBooleanExtra(EXTRA_NOTIFICATION_OPEN_HOME, false) == true) {
+            widgetHomeRequest++
+            intent.removeExtra(EXTRA_NOTIFICATION_OPEN_HOME)
+        }
     }
 }

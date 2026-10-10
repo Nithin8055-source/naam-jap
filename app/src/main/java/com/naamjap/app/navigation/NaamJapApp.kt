@@ -18,7 +18,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.unit.dp
@@ -44,6 +48,9 @@ import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.time.ZoneId
+import androidx.compose.ui.platform.LocalContext
+import com.naamjap.app.widget.NaamJapWidgetRenderer
+import com.naamjap.app.widget.NaamJapWidgetSnapshotStore
 
 @HiltViewModel
 class PracticeFeedbackViewModel @Inject constructor(
@@ -69,12 +76,53 @@ fun NaamJapApp(
     themeChoice: ThemeChoice,
     onThemeChoice: (ThemeChoice) -> Unit,
     account: AccountIdentity,
-    onSignOut: () -> Unit
+    onSignOut: () -> Unit,
+    openJapRequest: Int = 0,
+    openHomeRequest: Int = 0
 ) {
+    val context = LocalContext.current
     val hazeState = rememberHazeState()
     val feedbackViewModel: PracticeFeedbackViewModel = hiltViewModel()
     val practiceState by feedbackViewModel.state.collectAsStateWithLifecycle()
-    val pagerState = rememberPagerState(pageCount = { Destination.primary.size })
+    var savedPage by rememberSaveable { mutableIntStateOf(0) }
+    val pagerState = rememberPagerState(
+        initialPage = savedPage.coerceIn(0, Destination.primary.lastIndex),
+        pageCount = { Destination.primary.size }
+    )
+    LaunchedEffect(pagerState) {
+        snapshotFlow { pagerState.settledPage }.collect { page -> savedPage = page }
+    }
+    LaunchedEffect(openJapRequest) {
+        if (openJapRequest > 0) {
+            val page = Destination.primary.indexOf(Destination.Jap)
+            if (page >= 0) pagerState.animateScrollToPage(page)
+        }
+    }
+    LaunchedEffect(openHomeRequest) {
+        if (openHomeRequest > 0) pagerState.animateScrollToPage(Destination.primary.indexOf(Destination.Home))
+    }
+    LaunchedEffect(
+        account.userId,
+        practiceState.hasLoaded,
+        practiceState.dashboard,
+        practiceState.activeSession?.count,
+        practiceState.error
+    ) {
+        if (!practiceState.hasLoaded) return@LaunchedEffect
+        if (practiceState.error == null) {
+            NaamJapWidgetSnapshotStore.write(
+                context = context,
+                userId = account.userId,
+                count = practiceState.dashboard.todayCount,
+                goal = practiceState.dashboard.dailyGoal,
+                activeSessionId = practiceState.activeSession?.id,
+                sessionPaused = practiceState.activeSession?.isPaused == true
+            )
+        } else {
+            NaamJapWidgetSnapshotStore.setStatusForAccount(context, account.userId, "Needs sync - last confirmed")
+        }
+        NaamJapWidgetRenderer.updateAll(context)
+    }
     val scope = rememberCoroutineScope()
     val manualRecordOpenState = remember { mutableStateOf(false) }
     val manualRecordOpen by manualRecordOpenState
@@ -119,7 +167,11 @@ fun NaamJapApp(
             } else {
                 HorizontalPager(
                     state = pagerState,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxSize(),
+                    // Prepare only the adjacent screens so their initial composition
+                    // does not land on the first frame of a user-driven swipe.
+                    beyondViewportPageCount = 1,
+                    key = { page -> Destination.primary[page].route }
                 ) { page ->
                     when (Destination.primary[page]) {
                         Destination.Home -> HomeScreen(

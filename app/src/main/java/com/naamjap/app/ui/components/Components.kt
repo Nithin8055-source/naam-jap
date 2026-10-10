@@ -25,10 +25,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -51,10 +51,8 @@ import androidx.compose.material3.SnackbarHostState
 import com.naamjap.app.navigation.Destination
 import com.naamjap.app.R
 import com.naamjap.app.ui.theme.JapSpacing
+import com.naamjap.app.ui.theme.Elevated
 import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.HazeInput
-import dev.chrisbanes.haze.blur.HazeBlurStyle
-import dev.chrisbanes.haze.blur.hazeBlur
 import java.text.NumberFormat
 
 fun formatCount(count: Long): String = NumberFormat.getIntegerInstance().format(count)
@@ -308,8 +306,8 @@ fun ThemePreview(label: String, selected: Boolean, onClick: () -> Unit, icon: @C
 @Composable
 fun GlassBottomBar(selectedRoute: String?, onSelect: (Destination) -> Unit, modifier: Modifier = Modifier, hazeState: HazeState? = null) {
     val haptics = LocalHapticFeedback.current
-    val surfaceColor = MaterialTheme.colorScheme.surface
     val borderColor = MaterialTheme.colorScheme.secondary
+    val pillColor = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color.Black else Elevated
     val shape = RoundedCornerShape(26.dp)
     BoxWithConstraints(modifier.fillMaxWidth()) {
         val pillWidth = (maxWidth - 32.dp).coerceAtLeast(0.dp).coerceAtMost(480.dp)
@@ -318,20 +316,9 @@ fun GlassBottomBar(selectedRoute: String?, onSelect: (Destination) -> Unit, modi
                 .width(pillWidth)
                 .align(Alignment.Center)
                 .shadow(10.dp, shape, clip = false)
-                .clip(shape)
-                .then(
-                    if (hazeState != null) Modifier.hazeBlur(
-                        input = HazeInput.Sources(hazeState),
-                        style = HazeBlurStyle {
-                            blurRadius(18.dp)
-                            blurredEdgeTreatment(BlurredEdgeTreatment(shape))
-                            backgroundColor(Color.Transparent)
-                            alpha(.96f)
-                        }
-                    ) else Modifier
-                ),
+                .clip(shape),
             shape = shape,
-            color = surfaceColor.copy(alpha = .72f),
+            color = pillColor,
             border = BorderStroke(1.dp, borderColor.copy(alpha = .24f)),
             shadowElevation = 0.dp,
             tonalElevation = 0.dp
